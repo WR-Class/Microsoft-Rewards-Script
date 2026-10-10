@@ -25,3 +25,6 @@ note
 /.zcode/
 /scripts/tests
 /docs
+# 面板目录下我复制的本机测试脚本（含真实邮箱地址，严禁提交）。
+# 面板自带的 .gitignore 不覆盖 local/，这里补上，避免 git add . 时误推。
+/dashboard/rewards-dashboard/local/
