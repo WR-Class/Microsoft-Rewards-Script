@@ -60,22 +60,26 @@ Stack Trace:
 ${error.stack || 'No stack trace available'}
         `.trim()
 
-        const [htmlContent, screenshotBuffer] = await Promise.all([
-            page.content(),
-            page.screenshot({ fullPage: true, type: 'png' })
-        ])
+        // 页面可能在 isClosed() 检查之后立刻被关掉（实测竞态，出现过 20 次）：截图失败不该连带
+        // 丢掉 HTML 和 error.txt，也不该用 console.error 往错误列表里灌一条没有账号的"错误"。
+        const htmlContent = await page.content().catch(() => '')
+        const screenshotBuffer = await page
+            .screenshot({ fullPage: true, type: 'png' })
+            .catch(() => null)
 
         await fs.mkdir(outputDir, { recursive: true })
 
         await Promise.all([
-            fs.writeFile(path.join(outputDir, 'dump.html'), htmlContent),
-            fs.writeFile(path.join(outputDir, 'screenshot.png'), screenshotBuffer),
+            htmlContent ? fs.writeFile(path.join(outputDir, 'dump.html'), htmlContent) : Promise.resolve(),
+            screenshotBuffer
+                ? fs.writeFile(path.join(outputDir, 'screenshot.png'), screenshotBuffer)
+                : Promise.resolve(),
             fs.writeFile(path.join(outputDir, 'error.txt'), errorLog)
         ])
 
         console.log(`Diagnostics saved to: ${outputDir}`)
     } catch (error) {
-        console.error('Unable to create error diagnostics:', error)
+        console.log(`Unable to create error diagnostics: ${error instanceof Error ? error.message : error}`)
     }
 }
 

@@ -23,6 +23,7 @@ import {
     findUnknownOptions,
     getProjectRoot,
     loadEnvFile,
+    readEnvFileValues,
     loadConfigSafe,
     redactSecrets,
     envStr,
@@ -33,6 +34,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = getProjectRoot(__dirname)
 
 loadEnvFile(projectRoot)
+
+// loadEnvFile() runs once, at startup, and never overwrites a key that is already
+// set - so an account added to .env later (the dashboard writes .env directly,
+// without restarting this process) stays invisible to /accounts and to the
+// selection endpoints for the life of the process. The account-aware routes
+// therefore re-read the file per request: the file, not this process's
+// environment, is the authority for which accounts exist.
+function accountsEnv() {
+    return { ...process.env, ...readEnvFileValues(projectRoot) }
+}
 
 const cliArgs = parseArgs(process.argv.slice(2), { boolean: ['help', 'h'] })
 
@@ -421,7 +432,7 @@ const requestHandler = async (req, res) => {
 
         // account overview
         if (method === 'GET' && pathname === '/accounts') {
-            const accounts = mergeAccountStats(loadAccounts(), pm.getHistory().map(toHistoryRecord))
+            const accounts = mergeAccountStats(loadAccounts(accountsEnv()), pm.getHistory().map(toHistoryRecord))
             return sendJson(res, 200, { accounts, count: accounts.length })
         }
 
@@ -598,11 +609,11 @@ const requestHandler = async (req, res) => {
                     })
                 }
                 if (body.accountIndex != null) {
-                    const selection = buildSingleAccountEnv(body.accountIndex)
+                    const selection = buildSingleAccountEnv(body.accountIndex, accountsEnv())
                     overrides.env = { ...(overrides.env || {}), ...selection.env }
                     selectedAccount = selection.account
                 } else if (body.excludedAccountIndexes != null) {
-                    const selection = buildExcludedAccountsEnv(body.excludedAccountIndexes)
+                    const selection = buildExcludedAccountsEnv(body.excludedAccountIndexes, accountsEnv())
                     overrides.env = { ...(overrides.env || {}), ...selection.env }
                     excludedAccounts = selection.excludedAccounts
                 }
@@ -652,11 +663,11 @@ const requestHandler = async (req, res) => {
                     })
                 }
                 if (body.accountIndex != null) {
-                    const selection = buildSingleAccountEnv(body.accountIndex)
+                    const selection = buildSingleAccountEnv(body.accountIndex, accountsEnv())
                     overrides.env = { ...(overrides.env || {}), ...selection.env }
                     selectedAccount = selection.account
                 } else if (body.excludedAccountIndexes != null) {
-                    const selection = buildExcludedAccountsEnv(body.excludedAccountIndexes)
+                    const selection = buildExcludedAccountsEnv(body.excludedAccountIndexes, accountsEnv())
                     overrides.env = { ...(overrides.env || {}), ...selection.env }
                     excludedAccounts = selection.excludedAccounts
                 }

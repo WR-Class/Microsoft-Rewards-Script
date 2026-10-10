@@ -65,7 +65,9 @@ export class Login {
         recoveryEmail: '[data-testid="proof-confirmation"]',
         emailVerificationInput: 'input#proof-confirmation-email-input',
         accountLocked: '#serviceAbuseLandingTitle',
-        errorAlert: 'div[role="alert"]',
+        // cookie 同意条 #wcpConsentBannerCtrl 自身就是 div[role="alert"]，而且实测是登录页上
+        // 唯一的一个。不排除它，登录页每次都会被判成 ERROR_ALERT，同意条文案被当成登录错误。
+        errorAlert: 'div[role="alert"]:not(#wcpConsentBannerCtrl)',
         passwordEntry: '[data-testid="passwordEntry"]',
         emailEntry: 'input#usernameEntry',
         kmsiVideo: '[data-testid="kmsiVideo"]',
@@ -117,6 +119,13 @@ export class Login {
 
                 iteration++
                 this.bot.logger.debug(this.bot.isMobile, 'LOGIN', `状态检查迭代 ${iteration}/${maxIterations}`)
+
+                // cookie 同意条要主动关掉：它既可能挡住页面，自身又是个 div[role=alert]。
+                // 只点它自己的"接受"按钮 —— tryDismissAllMessages 还会点主按钮，登录过程中不能用。
+                const consentAccept = '#wcpConsentBannerCtrl > * > button:first-child'
+                if (await this.checkSelector(page, consentAccept)) {
+                    await this.tryClick(page, consentAccept, 'cookie 同意条接受')
+                }
 
                 const state = await this.detectCurrentState(page)
                 this.bot.logger.debug(this.bot.isMobile, 'LOGIN', `当前状态: ${state}`)
@@ -479,8 +488,14 @@ export class Login {
                         break
                     }
                 }
-                if (!errorMsg) {
-                    this.bot.logger.warn(this.bot.isMobile, 'LOGIN', '告警容器无文本，视为瞬时状态，稍后重新检测')
+                // 空文本、以及 cookie 同意条文案，都不算登录错误（选择器里的 :not 是主防线，
+                // 这里兜住同意条 id 改名的情况）
+                if (!errorMsg || /optional cookies|Privacy Statement|Manage Cookies/i.test(errorMsg)) {
+                    this.bot.logger.warn(
+                        this.bot.isMobile,
+                        'LOGIN',
+                        '告警容器无文本或是 cookie 同意条，视为瞬时状态，稍后重新检测'
+                    )
                     await this.bot.utils.wait(2000)
                     return true
                 }
@@ -667,10 +682,17 @@ export class Login {
             case 'EMAIL_VERIFICATION_INPUT': {
                 if (!account.password) {
                     if (!canPromptForInput()) {
+                        // Name the FIX, not just the symptom. This account reached the
+                        // "verify your email" page and has no password, no recovery address and
+                        // no interactive terminal, so nothing in this process can clear it:
+                        // a live account lost its whole run to exactly this, and the old
+                        // message ("邮箱验证需要已配置的密码或交互式终端输入") did not say which
+                        // of the three to supply.
                         this.bot.logger.error(
                             this.bot.isMobile,
                             'LOGIN',
-                            '邮箱验证需要已配置的密码或交互式终端输入'
+                            `该账号触发了邮箱验证码，但既没配置密码、也没有恢复邮箱，当前运行又没有交互式终端可输入；` +
+                                `本轮跳过 ${account?.email ?? ''}（人工登录该账号一次，或在 .env 里补上它的密码）`
                         )
                         return false
                     }
@@ -857,6 +879,63 @@ export class Login {
             case 'UNKNOWN': {
                 const rawUrl = page.url()
                 const url = new URL(rawUrl)
+
+                // 身份验证挑战页（"Help us protect your account / We've detected something unusual
+                // about this sign-in"）：需要人工从恢复邮箱收验证码，机器人无法自行完成。
+                // 必须立刻失败并给出可执行提示 —— 之前这里只打 warn 就继续，实测空转 22 次、4 分钟，
+                // 最后抛 "Login timeout"，把整个账号（含桌面端）一起废掉。
+                if (url.hostname === 'account.live.com' && url.pathname.includes('/identity/confirm')) {
+                    this.bot.logger.error(
+                        this.bot.isMobile,
+                        'LOGIN',
+                        `该账号被微软判定为异常登录，需人工用该账号的恢复邮箱收验证码确认一次；本轮跳过 ${
+                            account?.email ?? ''
+                        }`
+                    )
+                    return false
+                }
+
+                // FIDO / passkey 创建引导页（login.microsoft.com/consumers/fido/*）：
+                // 机器人无法完成 passkey 注册，但这一页通常可以直接关掉。
+                // 之前它落到下面的通用 warn 分支，一路空转到迭代上限（实测 25 轮 ≈ 2.5 分钟），
+                // 然后抛 "Login timeout"，把整个账号连同已完成的桌面端一起废掉。
+                if (url.hostname === 'login.microsoft.com' && url.pathname.includes('/consumers/fido/')) {
+                    this.bot.logger.warn(
+                        this.bot.isMobile,
+                        'LOGIN',
+                        `命中 FIDO/passkey 页面（${url.pathname}），先尝试关闭再继续`
+                    )
+
+                    const dismissTargets: Array<[string, string]> = [
+                        [this.selectors.secondaryButton, 'FIDO 次要按钮（暂不/取消）'],
+                        [this.selectors.footerAction, 'FIDO 页脚操作'],
+                        [this.selectors.backButton, 'FIDO 返回按钮']
+                    ]
+
+                    for (const [selector, label] of dismissTargets) {
+                        if (!(await this.tryClick(page, selector, label))) continue
+
+                        await this.bot.utils.wait(2000)
+                        if (!page.url().includes('/consumers/fido/')) {
+                            this.bot.logger.info(
+                                this.bot.isMobile,
+                                'LOGIN',
+                                `已离开 FIDO 页面，继续登录流程 | 当前=${page.url()}`
+                            )
+                            return true
+                        }
+                    }
+
+                    this.bot.logger.error(
+                        this.bot.isMobile,
+                        'LOGIN',
+                        `FIDO/passkey 创建页无法自动关闭（${url.pathname}）：该账号需要在真实浏览器里手动跳过/关闭一次 passkey 引导；本轮跳过 ${
+                            account?.email ?? ''
+                        }`
+                    )
+                    return false
+                }
+
                 this.bot.logger.warn(
                     this.bot.isMobile,
                     'LOGIN',

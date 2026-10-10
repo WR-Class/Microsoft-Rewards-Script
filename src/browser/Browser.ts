@@ -51,8 +51,11 @@ class Browser {
     async createBrowser(account: Account): Promise<BrowserCreationResult> {
         const headless = this.bot.config.headless
         const channel = this.bot.config.browserChannel ?? 'chromium'
-        // 真实 Edge 依赖系统安装；linux（docker）环境通常没有，回退内置补丁版 Chromium
-        const useRealEdge = channel === 'msedge' && process.platform !== 'linux'
+        // 系统安装的浏览器（Edge / Chrome）通过 playwright 的 channel 选项启动；
+        // linux（docker）环境通常两者都没有，回退内置补丁版 Chromium
+        const nativeChannel = channel === 'chromium' ? null : channel
+        const useNativeChannel = nativeChannel !== null && process.platform !== 'linux'
+        const nativeLabel = nativeChannel === 'msedge' ? 'Edge' : 'Chrome'
 
         const hasProxy = Boolean(account.proxy.url)
         const ignoreCertificateErrors = hasProxy && this.bot.config.proxy.ignoreCertificateErrors
@@ -86,33 +89,33 @@ class Browser {
                 )
             }
 
-            if (channel === 'msedge' && !useRealEdge) {
+            if (nativeChannel && !useNativeChannel) {
                 this.bot.logger.warn(
                     this.bot.isMobile,
                     'BROWSER',
-                    'browserChannel=msedge 在当前平台不可用（未安装系统 Edge），已回退内置补丁版 Chromium'
+                    `browserChannel=${channel} 在当前平台不可用（未安装系统 ${nativeLabel}），已回退内置补丁版 Chromium`
                 )
-            } else if (useRealEdge) {
+            } else if (nativeChannel === 'msedge') {
                 // Edge 152 + playwright/patchright 1.6x 访问微软账户页面（rewards/登录）会触发浏览器进程崩溃，
                 // 上游 issue microsoft/playwright#41438 至 1.63.0 仍未修复；稳定前保持实验性
                 this.bot.logger.warn(
                     this.bot.isMobile,
                     'BROWSER',
-                    'browserChannel=msedge 为实验性选项：当前 Edge/playwright 版本组合在访问 rewards.bing.com 时可能崩溃（上游 #41438），如遇失败请改回 chromium'
+                    'browserChannel=msedge 为实验性选项：当前 Edge/playwright 版本组合在访问 rewards.bing.com 时可能崩溃（上游 #41438），如遇失败请改用 browserChannel=chrome'
                 )
             }
 
             this.bot.logger.info(
                 this.bot.isMobile,
                 'BROWSER',
-                useRealEdge
-                    ? `正在启动真实 Edge (channel=msedge) | headless=${headless} | platform=${process.platform} | proxy=${hasProxy ? 'yes' : 'no'} | tls=${ignoreCertificateErrors ? 'verification-disabled' : 'verified'}`
+                useNativeChannel
+                    ? `正在启动系统 ${nativeLabel} (channel=${nativeChannel}) | headless=${headless} | platform=${process.platform} | proxy=${hasProxy ? 'yes' : 'no'} | tls=${ignoreCertificateErrors ? 'verification-disabled' : 'verified'}`
                     : `正在启动内置的补丁版 Chromium (Edge UA) | headless=${headless} | platform=${process.platform} | proxy=${hasProxy ? 'yes' : 'no'} | tls=${ignoreCertificateErrors ? 'verification-disabled' : 'verified'} | sandbox=${sandboxDisabled ? 'disabled-root' : 'enabled'}`
             )
 
             browser = await rebrowser.chromium.launch({
                 headless,
-                ...(useRealEdge && { channel: 'msedge' as const }),
+                ...(useNativeChannel && nativeChannel && { channel: nativeChannel }),
                 ...(proxyConfig && { proxy: proxyConfig }),
                 args: [...Browser.BROWSER_ARGS, ...sandboxArgs, ...certArgs]
             })
@@ -147,9 +150,9 @@ class Browser {
                 ? account.saveFingerprint.mobile
                 : account.saveFingerprint.desktop
 
-            // 真实 Edge 桌面端：保留浏览器原生指纹一致性（真 UA/WebGL/字体/编解码器），
+            // 系统安装的浏览器桌面端：保留浏览器原生指纹一致性（真 UA/WebGL/字体/编解码器），
             // 不做合成指纹注入，仅从真实环境读取 UA 供 HTTP 层使用
-            const useNativeFingerprint = useRealEdge && !this.bot.isMobile
+            const useNativeFingerprint = useNativeChannel && !this.bot.isMobile
 
             let fingerprint: BrowserFingerprintWithHeaders
             let context: BrowserContext

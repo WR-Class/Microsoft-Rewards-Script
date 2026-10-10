@@ -1,4 +1,9 @@
-export type BrowserChannel = 'chromium' | 'msedge'
+// 'chromium' = the bundled patched build (needs `patchright install chromium`);
+// 'msedge' / 'chrome' = a system-installed browser, used via playwright's
+// channel option. On this machine the bundled download is unreachable and Edge
+// 152+ crashes on the Microsoft account pages (upstream playwright#41438), so
+// 'chrome' is the working native channel here.
+export type BrowserChannel = 'chromium' | 'msedge' | 'chrome'
 
 export interface Config {
     sessionPath: string

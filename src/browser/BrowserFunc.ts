@@ -329,7 +329,34 @@ export default class BrowserFunc {
             // discovered from chunks referenced by either page
             this.bot.nextActions = await this.resolveActionIds(page, sources)
 
-            const dashboardRendered = /<section\b[^>]*\bid=["']dailyset["']/i.test(sources.join('\n'))
+            let dashboardRendered = /<section\b[^>]*\bid=["']dailyset["']/i.test(sources.join('\n'))
+            if (!dashboardRendered) {
+                // One bounded retry. The dashboard sometimes comes back as a login shell on the
+                // first pass (a redirect still in flight): a single miss of this check cost a live
+                // account its ENTIRE run. Everything derived below is rebuilt from the retry's
+                // sources - keeping the first attempt's snapshot would silently poison every later
+                // step, which is worse than the abort.
+                this.bot.logger.warn(this.bot.isMobile, 'BOOTSTRAP', '仪表板未渲染，重新加载后重试一次')
+                await page.goto(URLs.rewards.earn, { waitUntil: 'domcontentloaded' }).catch(() => {})
+                await this.dismissRewardsWelcomeDialog(page)
+
+                const retryDom = await page.content().catch(() => '')
+                const retryEarn = await this.fetchBootstrapHtml(page, URLs.rewards.earn, '/earn')
+                const retryDashboard = await this.fetchBootstrapHtml(page, URLs.rewards.dashboard, '/dashboard')
+                const retrySources = [retryDom, retryEarn, retryDashboard].filter(Boolean)
+
+                dashboardRendered = /<section\b[^>]*\bid=["']dailyset["']/i.test(retrySources.join('\n'))
+
+                if (dashboardRendered) {
+                    const retrySnapshot = this.bot.browser.react.snapshotPage(retrySources)
+                    this.bot.reactSnapshot = retrySnapshot
+                    if (this.bot.isMobile) this.bot.reactSnapshots.mobile = retrySnapshot
+                    else this.bot.reactSnapshots.desktop = retrySnapshot
+
+                    this.bot.nextActions = await this.resolveActionIds(page, retrySources)
+                    this.bot.logger.info(this.bot.isMobile, 'BOOTSTRAP', '重试后仪表板已渲染，继续运行')
+                }
+            }
             if (!dashboardRendered) {
                 throw new Error(
                     'Rewards dashboard did not render (no section#dailyset) - likely a login/redirect issue, aborting'

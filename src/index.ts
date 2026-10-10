@@ -525,6 +525,9 @@ export class MicrosoftRewardsBot {
 
             const accountStartTime = Date.now()
             const accountEmail = account.email
+            // 每个账号重置初始余额：否则账号 A 失败时会把账号 B 的初始余额当成自己的，
+            // 算出错误的"已赚积分"。NaN = 本轮还没读到初始余额（失败分支靠它判断能否做差额）。
+            this.userData.initialPoints = Number.NaN
             this.userData.userName = this.utils.getEmailUsername(accountEmail)
             this.userData.timezoneOffset = String(new Date().getTimezoneOffset())
 
@@ -550,7 +553,20 @@ export class MicrosoftRewardsBot {
                 let flowError: string | undefined
                 const result: AccountRunResult | undefined = await this.Main(account).catch(error => {
                     flowError = error instanceof Error ? error.message : String(error)
-                    void this.logger.error(true, 'FLOW', `${accountEmail} 的移动端流程失败: ${flowError}`)
+
+                    // 这里以前写死"移动端流程失败"、并以 isMobile=true 记录 —— 实测那次的失败
+                    // 发生在**桌面端**登录（FIDO/passkey 页空转到 25 轮），于是文案和结构化
+                    // platform 字段一起撒谎，把排查引向错误的子系统。AsyncLocalStorage 的上下文
+                    // 此刻已经退出，拿不到当时的平台，所以报告"最后进入的阶段"并把日志归到 MAIN，
+                    // 宁可少说，不再乱指。
+                    const seen = this.logger.lastPlatform
+                    const phase = seen === 'main' || seen === null ? '未进入浏览器阶段' : seen ? '移动端' : '桌面端'
+
+                    void this.logger.error(
+                        'main',
+                        'FLOW',
+                        `${accountEmail} 的账号流程失败: ${flowError} | 最后阶段=${phase}`
+                    )
                     return undefined
                 })
 
@@ -599,11 +615,43 @@ export class MicrosoftRewardsBot {
                         ? flowError.replace(/\r?\n/g, ' ').slice(0, 120)
                         : '流程失败（未捕获到错误详情）'
 
+                    // 中途失败时之前直接记 0 分，于是"桌面端已经赚到、后面某个阶段才失败"
+                    // 这类账号的分被从本轮账本里抹掉（实测少算了一个账号的 350 分）。
+                    // 这里把已赚的分尽量捞回来：只有本账号的初始余额已经读到才做差额，
+                    // 余额复核失败就如实记 0 —— 不猜，也不把账号原有的余额当成赚到的。
+                    let accountInitialPoints = 0
+                    let salvagePoints = 0
+
+                    if (Number.isFinite(this.userData.initialPoints)) {
+                        accountInitialPoints = this.userData.initialPoints as number
+                        try {
+                            const balanceNow = await Promise.race([
+                                this.browser.func.getCurrentPoints(),
+                                new Promise<number>(resolve => setTimeout(() => resolve(Number.NaN), 20000))
+                            ])
+                            if (Number.isFinite(balanceNow)) {
+                                salvagePoints = Math.max(0, balanceNow - accountInitialPoints)
+                            }
+                        } catch {
+                            // 会话可能已随失败关闭；复核不到就记 0。
+                        }
+                    }
+
+                    if (salvagePoints > 0) {
+                        this.logger.warn(
+                            'main',
+                            'ACCOUNT-PARTIAL',
+                            `${accountEmail} | 流程失败但已获得积分=${salvagePoints} | 原余额=${accountInitialPoints} | 现余额=${
+                                accountInitialPoints + salvagePoints
+                            } | 错误=${errorDetail}`
+                        )
+                    }
+
                     accountStats.push({
                         email: accountEmail,
-                        initialPoints: 0,
-                        finalPoints: 0,
-                        collectedPoints: 0,
+                        initialPoints: accountInitialPoints,
+                        finalPoints: accountInitialPoints + salvagePoints,
+                        collectedPoints: salvagePoints,
                         duration: parseFloat(durationSeconds),
                         success: false,
                         error: errorDetail

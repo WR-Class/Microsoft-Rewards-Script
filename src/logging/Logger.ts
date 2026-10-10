@@ -129,7 +129,16 @@ function writeLogToFile(logContent: string): void {
 }
 
 export class Logger {
+    // 最近一条日志的平台。用于失败归因：runTasks 的 catch 处 AsyncLocalStorage 的上下文
+    // 已经退出（getCurrentContext() 会返回默认的 isMobile:false，等于瞎猜桌面端），
+    // 拿不到当时的真实阶段，所以在每次写日志时顺手记下最后一次看到的平台。
+    private lastPlatformSeen: Platform | null = null
     constructor(private bot: MicrosoftRewardsBot) {}
+
+    /** 最后一次记录的日志平台；null 表示本进程还没写过任何日志 */
+    get lastPlatform(): Platform | null {
+        return this.lastPlatformSeen
+    }
 
     info(isMobile: Platform, title: string, message: string, color?: ColorKey) {
         return this.baseLog('info', isMobile, title, message, color)
@@ -155,6 +164,8 @@ export class Logger {
         color?: ColorKey
     ): void {
         const config = this.bot.config
+        // 放在 debug 提前返回之前：否则关掉 debugLogs 时这条记录就断了。
+        this.lastPlatformSeen = isMobile
         if (level === 'debug' && !config.debugLogs && !process.argv.includes('-dev')) return
 
         const now = new Date().toLocaleString()

@@ -15,10 +15,13 @@ note
 .DS_Store
 .playwright-chromium-installed
 .stfolder/
-.envlogs/
 /logs
 # 本地私密配置与编辑器工作目录，严禁提交
+# .env 的各种变体（.env.bak / .env.local / .env.old …）装的是同一批明文凭据，
+# 一并挡住；只放行可以公开的示例文件。
 /.env
+/.env.*
+!/.env.example
 /.zcode/
 /scripts/tests
 /docs

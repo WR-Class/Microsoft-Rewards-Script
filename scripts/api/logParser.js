@@ -114,6 +114,10 @@ const RE = {
     accountDelay: /^等待 ([\d.]+) 秒后开始下一个账户(?: \((\S+@\S+)\))?$/,
 
     searchStart: /^开始必应搜索 \| 当前余额=(\d+)/,
+    // Search lines are the one activity this fork labels in Chinese; everything else keeps
+    // the English names (pointsGained/currentBalance), so numericField() below never read them.
+    searchProgress: /^获得积分=(-?\d+) \| 当前余额=(\d+)/,
+    searchFinished: /^必应搜索完成 \| 获得积分=(-?\d+) \| 当前余额=(\d+)/,
     flowCollected: /^积分已收集 \| 获得积分=(-?\d+) \| 现余额=(\d+) \| 账户=(\S+@\S+)/
 }
 
@@ -214,6 +218,20 @@ function applyLivePoints(state, entry) {
     let m
     if ((entry.title === 'SEARCH-BING' || entry.title === 'SEARCH-BONUS') && (m = msg.match(RE.searchStart))) {
         return setBalance(target(), num(m[1]))
+    }
+
+    // Two shapes describe the same points and must not both be counted: one progress line per
+    // search ("获得积分=3 | 当前余额=393 | 查询=… | remaining=12") and one closing summary per
+    // batch ("必应搜索完成 | 获得积分=15 | 当前余额=405 | 之前余额=390 | 搜索次数=5"), whose
+    // 获得积分 is the batch total (observed 15 = 5 x 3). Count the summary; let the progress
+    // lines refresh the level only - that is what stops live.balance freezing between two
+    // FLOW '积分已收集' totals.
+    if ((entry.title === 'SEARCH-BING' || entry.title === 'SEARCH-BONUS') && (m = msg.match(RE.searchProgress))) {
+        return setBalance(target(), num(m[2]))
+    }
+
+    if ((entry.title === 'SEARCH-BING' || entry.title === 'SEARCH-BONUS') && (m = msg.match(RE.searchFinished))) {
+        return addGain(target(), num(m[1]), num(m[2]), pointEventSource(entry.title, msg) ?? 'search')
     }
 
     if (entry.title === 'FLOW' && (m = msg.match(RE.flowCollected))) {

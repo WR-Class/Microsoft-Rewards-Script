@@ -69,26 +69,46 @@ export function getProjectRoot(startDir) {
     throw new Error('Could not locate project root (package.json not found).')
 }
 
-export function loadEnvFile(projectRoot) {
-    const candidates = [
+function envFileCandidates(projectRoot) {
+    return [
         path.resolve(process.cwd(), '.env'),
         path.join(projectRoot, '.env'),
         path.join(projectRoot, 'dist', '.env')
     ]
-    const envFile = candidates.find(p => fs.existsSync(p))
-    if (!envFile) return null
+}
 
-    const raw = fs.readFileSync(envFile, 'utf8')
-    for (const line of raw.split(/\r?\n/)) {
+/**
+ * Parse the bot's .env into a plain object WITHOUT touching process.env.
+ * Routes that must see an entry added after this process started (a new
+ * ACCOUNT_N written by the dashboard, say) read the file per request through
+ * this, instead of trusting the one-time load below.
+ */
+export function readEnvFileValues(projectRoot) {
+    const envFile = envFileCandidates(projectRoot).find(p => fs.existsSync(p))
+    if (!envFile) return {}
+
+    const values = {}
+    for (const line of fs.readFileSync(envFile, 'utf8').split(/\r?\n/)) {
         const trimmed = line.trim()
         if (!trimmed || trimmed.startsWith('#')) continue
         const eq = trimmed.indexOf('=')
         if (eq === -1) continue
         const key = trimmed.slice(0, eq).trim()
+        if (!key) continue
         let value = trimmed.slice(eq + 1).trim()
         if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
             value = value.slice(1, -1)
         }
+        values[key] = value
+    }
+    return values
+}
+
+export function loadEnvFile(projectRoot) {
+    const envFile = envFileCandidates(projectRoot).find(p => fs.existsSync(p))
+    if (!envFile) return null
+
+    for (const [key, value] of Object.entries(readEnvFileValues(projectRoot))) {
         if (process.env[key] === undefined) process.env[key] = value
     }
     return envFile
