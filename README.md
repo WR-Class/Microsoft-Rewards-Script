@@ -256,7 +256,12 @@ docker compose restart          # 重启（不重建）
 - `GET /events` SSE 实时日志流；会话查询与删除
 - 完整文档见 [`scripts/api/README.md`](scripts/api/README.md)
 
-配套 Web 面板推荐 [Rewards Dashboard](https://github.com/mgrimace/rewards-dashboard)，可管理运行、账户、调度、日志、积分。
+配套 Web 面板已随本仓库一并提供，位于 [`dashboard/`](dashboard/)：**本仓库同时是后端（`scripts/api` 控制 API）与前端（`dashboard/` 面板）**。
+
+- 来源：[mgrimace/rewards-dashboard](https://github.com/mgrimace/rewards-dashboard) 的分支，按原目录结构原样并入，未改写其代码
+- 启动：进入 `dashboard/rewards-dashboard/`，按该目录的 `README.md` 配置 `.env` 后运行 `node server.js`（默认 `http://127.0.0.1:8890`）
+- 连接：面板用 `CONTROL_API_URL` 指向控制 API；若控制 API 设了 `API_TOKEN`，面板侧需把同一个值配到 `CONTROL_API_TOKEN`，否则面板会报令牌不匹配
+- 不入库：面板的 `.env`（含令牌）、运行数据 `data/`、本地测试脚本，均由其自带的 `.gitignore` 覆盖
 
 ---
 

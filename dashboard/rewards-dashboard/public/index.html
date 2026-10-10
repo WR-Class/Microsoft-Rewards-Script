@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="mobile-web-app-capable" content="yes">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="/icon.png" type="image/png">
+    <link rel="apple-touch-icon" href="/icon.png">
+    <title>微软积分面板</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳到主内容</a>
+
+    <header class="topbar">
+      <h1>🏅 微软积分面板</h1>
+      <div class="topbar-right">
+        <p
+          id="statusBadge"
+          class="status-badge status-unknown"
+          role="status"
+          aria-live="polite"
+        >
+          <span class="dot" aria-hidden="true"></span>
+          <span id="statusText">连接中…</span>
+        </p>
+        <div class="controls-group">
+          <button
+            type="button"
+            id="modeToggle"
+            class="icon-btn"
+            aria-label="切换到深色模式"
+            title="切换到深色模式"
+          >
+            <span id="modeIcon" aria-hidden="true">&#9789;</span>
+          </button>
+          <div class="theme-select-wrapper">
+            <label for="themeSelect" class="visually-hidden">主题</label>
+            <select id="themeSelect" class="theme-select"></select>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <nav class="tabbar" aria-label="面板分区">
+      <div class="tabbar-inner" id="tabBar" role="tablist"></div>
+    </nav>
+
+    <!-- 运行控制条在每个标签页都可见：停止一次跑歪的运行，不该取决于你正好在看哪一页。 -->
+    <div class="control-strip">
+      <div class="ctl-state">
+        <span id="ctlPill" class="pill pill-idle">空闲</span>
+        <span id="ctlDetail" class="ctl-detail">&ndash;</span>
+      </div>
+      <div class="ctl-actions">
+        <button type="button" id="btnStart" class="btn btn-primary">
+          开始运行
+        </button>
+        <button type="button" id="btnStop" class="btn">停止</button>
+        <button type="button" id="btnRestart" class="btn">重启</button>
+        <div class="ctl-more">
+          <button
+            type="button"
+            id="btnMore"
+            class="btn btn-icon"
+            aria-haspopup="true"
+            aria-expanded="false"
+            aria-label="更多操作"
+            title="更多操作"
+          >
+            &#8942;
+          </button>
+          <div class="ctl-menu" id="ctlMenu" hidden>
+            <button
+              type="button"
+              id="btnForceStop"
+              class="ctl-menu-item danger"
+            >
+              强制终止（SIGKILL）
+            </button>
+            <button type="button" id="btnShutdown" class="ctl-menu-item danger">
+              关闭控制 API
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <main id="main">
+      <section
+        id="loginCodesSection"
+        class="login-codes-section"
+        hidden
+        aria-labelledby="login-codes-heading"
+      >
+        <h2 id="login-codes-heading">&#128273; 需要批准登录</h2>
+        <div id="loginCodesList" class="login-codes-list"></div>
+      </section>
+      <div
+        id="loginCodesAnnounce"
+        class="visually-hidden"
+        aria-live="assertive"
+        aria-atomic="true"
+      ></div>
+
+      <div id="tabPanels"></div>
+    </main>
+
+    <footer class="foot">
+        <span id="footerVersion"></span>
+        <span class="foot-separator">•</span>
+        <span id="footerScriptVersion"></span>
+        <span class="foot-separator">•</span>
+        <span id="footerStatus">连接中…</span>
+    </footer>
+
+    <!-- 中文界面叠加层：必须在 app.js 之前，这样它先挂上观察器，再接管首次渲染。 -->
+    <script src="/zh-cn.js"></script>
+    <script src="/version.js"></script>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
