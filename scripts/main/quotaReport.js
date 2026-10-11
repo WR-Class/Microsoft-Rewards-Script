@@ -166,9 +166,9 @@ function main() {
             num('获得', 6) +
             num('原余额', 8) +
             num('现余额', 8) +
-            num('桌面余', 7) +
-            num('移动余', 7) +
-            num('Edge余', 7) +
+            num('开跑桌面', 9) +
+            num('开跑移动', 9) +
+            num('开跑Edge', 9) +
             num('错误', 5) +
             '  ' +
             pad('判定', 12) +
@@ -195,9 +195,9 @@ function main() {
                 num(row.collected, 6) +
                 num(row.initialBalance, 8) +
                 num(row.finalBalance, 8) +
-                num(row.remaining?.desktop, 7) +
-                num(row.remaining?.mobile, 7) +
-                num(row.remaining?.edge, 7) +
+                num(row.remaining?.desktop, 9) +
+                num(row.remaining?.mobile, 9) +
+                num(row.remaining?.edge, 9) +
                 num(row.errors, 5) +
                 '  ' +
                 pad(v, 12) +
@@ -219,7 +219,10 @@ function main() {
     console.log('  无产出      —— 跑完了但当天没有积分入账')
     console.log('  无数据      —— 只有零散日志，没有汇总行')
     console.log('')
-    console.log('「桌面余/移动余/Edge余」是当天最后一次记录的剩余搜索积分（越小说明越接近打满）。')
+    console.log('「开跑桌面/开跑移动/开跑Edge」是 prepare() 在搜索开始【之前】记录的剩余额度 ——')
+    console.log('它是起点，不是缺口。新的一天开跑时它就等于该账号当天的全额额度（各账号不同，')
+    console.log('实测有 15 分=5 次、30 分=10 次两种），跑完之后日志里会有')
+    console.log('「必应搜索完成 | … | remaining=0」表示拿满。把这一列当成"没跑完的量"是误读。')
 }
 
 main()
