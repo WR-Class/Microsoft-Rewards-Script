@@ -438,6 +438,52 @@ export class Login {
             .catch(() => false)
     }
 
+    // The primary action ("是" / "Yes" / continue) has changed markup more than once,
+    // and ghostClick resolves through ghost-cursor, which queries with
+    // document.querySelector and therefore cannot see inside an open shadow root.
+    // Candidate 0 is always the selector this flow used before, so a page that
+    // already works keeps working and the rest only widen what can be matched.
+    //
+    // Order matters on the KMSI page, which has both buttons: an exact-text match
+    // for "是" comes before button[type="submit"], because picking the wrong one
+    // there answers "否" and ends the sign-in entirely (observed by hand).
+    private static readonly primaryButtonCandidates = [
+        'button[data-testid="primaryButton"]',
+        '#idSIButton9',
+        'button:text-is("是")',
+        'button:text-is("Yes")',
+        'button[type="submit"]',
+        'input[type="submit"]'
+    ]
+
+    private async clickPrimaryButton(page: Page, note: string): Promise<boolean> {
+        for (const selector of Login.primaryButtonCandidates) {
+            if (await this.bot.browser.utils.ghostClick(page, selector)) {
+                this.bot.logger.debug(this.bot.isMobile, 'LOGIN', `主按钮已点击: ${selector} (${note})`)
+                return true
+            }
+
+            // A locator pierces open shadow roots where the ghost cursor cannot.
+            const clicked = await page
+                .locator(selector)
+                .first()
+                .click({ timeout: 2000 })
+                .then(() => true)
+                .catch(() => false)
+
+            if (clicked) {
+                this.bot.logger.info(
+                    this.bot.isMobile,
+                    'LOGIN',
+                    `主按钮已点击(locator): ${selector} (${note})`
+                )
+                return true
+            }
+        }
+
+        return false
+    }
+
     private logAvailableSignInMethods(options: SignInMethodOption[]): void {
         if (this.signInMethodsLogged) return
         this.signInMethodsLogged = true
@@ -553,7 +599,7 @@ export class Login {
             // Get a sign-in request - keep the primary Authenticator action when footer is a proof fallback
             case 'PASSWORDLESS_SEND_CODE': {
                 this.bot.logger.info(this.bot.isMobile, 'LOGIN', '继续使用主要登录方式')
-                const clicked = await this.bot.browser.utils.ghostClick(page, this.selectors.primaryButton)
+                const clicked = await this.clickPrimaryButton(page, 'PASSWORDLESS_SEND_CODE')
                 if (!clicked) {
                     this.bot.logger.warn(this.bot.isMobile, 'LOGIN', '无法继续使用主要登录方式')
                     return false
@@ -611,7 +657,10 @@ export class Login {
                         (await this.checkSelector(page, this.selectors.primaryButton))
                     ) {
                         this.bot.logger.info(this.bot.isMobile, 'LOGIN', '正在发送Microsoft Authenticator请求')
-                        const confirmed = await this.bot.browser.utils.ghostClick(page, this.selectors.primaryButton)
+                        const confirmed = await this.clickPrimaryButton(
+                            page,
+                            'Microsoft Authenticator request'
+                        )
                         if (!confirmed) {
                             this.passwordlessMethodSelected = false
                             this.bot.logger.warn(
@@ -786,7 +835,7 @@ export class Login {
             // 保持登录 / KMSI 确认
             case 'KMSI_PROMPT': {
                 this.bot.logger.info(this.bot.isMobile, 'LOGIN', '接受KMSI提示')
-                const clicked = await this.bot.browser.utils.ghostClick(page, this.selectors.primaryButton)
+                const clicked = await this.clickPrimaryButton(page, 'KMSI')
                 if (!clicked) {
                     this.bot.logger.warn(this.bot.isMobile, 'LOGIN', '无法接受KMSI提示')
                     return false

@@ -59,9 +59,17 @@ export class EmailLogin {
 
     async enterPassword(page: Page, password: string): Promise<'ok' | 'needs-2fa' | 'error'> {
         try {
-            const passwordInputSelector = 'input[type="password"]'
+            // The state detector recognises this page by [data-testid="passwordEntry"],
+            // while this method looked for input[type="password"] and gave up after one
+            // second - so a page that was detected could still fail to be filled. Seen on
+            // a real account: detected PASSWORD_INPUT at 11:38:00.646, "未找到密码字段" at
+            // 11:38:01.654, fatal at 11:38:01.655. That is a one-second wait, not a state
+            // timeout. Accept every shape the detector accepts, and give a freshly
+            // rendered page longer than a second to produce a visible field.
+            const passwordInputSelector =
+                'input[type="password"], [data-testid="passwordEntry"] input, input[name="passwd"], #i0118'
             const passwordField = await page
-                .waitForSelector(passwordInputSelector, { state: 'visible', timeout: 1000 })
+                .waitForSelector(passwordInputSelector, { state: 'visible', timeout: 5000 })
                 .catch(() => {})
             if (!passwordField) {
                 this.bot.logger.warn(this.bot.isMobile, 'LOGIN-ENTER-PASSWORD', '未找到密码字段')
@@ -69,9 +77,9 @@ export class EmailLogin {
             }
 
             await this.bot.utils.wait(1000)
-            await page.fill(passwordInputSelector, '').catch(() => {})
+            await passwordField.fill('').catch(() => {})
             await this.bot.utils.wait(500)
-            await page.fill(passwordInputSelector, password).catch(() => {})
+            await passwordField.fill(password).catch(() => {})
             await this.bot.utils.wait(1000)
 
             const submitButton = await page
