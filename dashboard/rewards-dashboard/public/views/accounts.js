@@ -440,10 +440,15 @@ function renderManageBox(root) {
         <span style="font-weight:600;">ACCOUNT_${a.index}</span>
         <span style="flex:1;min-width:0;overflow-wrap:anywhere;">${U.escapeHtml(a.email)}</span>
         <span class="hint" style="flex:0 0 auto;">${U.escapeHtml(meta.join(" · "))}</span>
+        <button type="button" class="btn btn-small" data-manage-edit="${a.index}">编辑</button>
         <button type="button" class="btn btn-danger btn-small" data-manage-remove="${a.index}">删除</button>
       </div>`;
     })
     .join("");
+
+  list.querySelectorAll("button[data-manage-edit]").forEach((btn) =>
+    btn.addEventListener("click", () => startEditAccount(Number(btn.dataset.manageEdit))),
+  );
 
   list.querySelectorAll("button[data-manage-remove]").forEach((btn) =>
     btn.addEventListener("click", () => removeManagedAccount(Number(btn.dataset.manageRemove))),
@@ -477,9 +482,70 @@ function offerRestart() {
     .catch((e) => U.toast(`重启失败：${e.message}`, "error", 6000));
 }
 
+// --- editing an account that is already saved --------------------------------
+// The write path already updates in place (lib/accountEnv.js: an explicit index
+// wins, otherwise the email is matched), and an empty field means "keep what is
+// stored". Both facts are what make editing safe here: the form may leave the
+// password blank, and it carries the row's own index so that renaming an
+// account cannot fork it into a second entry for one mailbox.
+
+function manageForm() {
+  return {
+    form: U.$("#accountsManageForm", rootEl),
+    index: U.$("#accountsManageForm input[name=index]", rootEl),
+    title: U.$("#accountsManageTitle", rootEl),
+    submit: U.$("#accountsManageSubmit", rootEl),
+    cancel: U.$("#accountsManageCancel", rootEl),
+    note: U.$("#accountsManageEditNote", rootEl),
+  };
+}
+
+function exitEditMode() {
+  const f = manageForm();
+  if (!f.form) return;
+  f.form.reset();
+  if (f.index) f.index.value = "";
+  if (f.title) f.title.textContent = "账号管理（写入机器人的 .env）";
+  if (f.submit) f.submit.textContent = "写入 .env";
+  if (f.cancel) f.cancel.hidden = true;
+  if (f.note) f.note.hidden = true;
+}
+
+function startEditAccount(index) {
+  const account = (managePayload?.accounts || []).find((a) => a.index === index);
+  const f = manageForm();
+  if (!account || !f.form) return;
+
+  f.form.reset();
+  if (f.index) f.index.value = String(index);
+  for (const name of ["email", "recoveryEmail", "geoLocale", "langCode"]) {
+    const field = f.form.elements[name];
+    if (field) field.value = account[name] || "";
+  }
+  // The API reports secrets as presence only, so these two stay empty - and an
+  // empty value means "leave it alone", which is what an edit usually wants.
+  const password = f.form.elements.password;
+  if (password) password.value = "";
+
+  if (f.title) f.title.textContent = `编辑 ACCOUNT_${index}`;
+  if (f.submit) f.submit.textContent = "保存修改";
+  if (f.cancel) f.cancel.hidden = false;
+  if (f.note) {
+    f.note.hidden = false;
+    f.note.textContent =
+      `正在编辑 ACCOUNT_${index}（${account.email}）：密码和 TOTP 留空＝不改动，已存的值不会被清除；` +
+      `改邮箱会就地更新这一条，不会新增账号。`;
+  }
+  f.form.scrollIntoView({ block: "nearest" });
+  if (password) password.focus();
+}
+
 async function submitManagedAccount(form) {
   const data = new FormData(form);
   const body = {
+    // Present only while editing: it pins the save to this row, which is what
+    // lets the email itself be changed without creating a duplicate.
+    index: Number(data.get("index")) || undefined,
     email: String(data.get("email") || "").trim(),
     password: String(data.get("password") || ""),
     totpSecret: String(data.get("totpSecret") || "").trim(),
@@ -498,7 +564,7 @@ async function submitManagedAccount(form) {
       `${result.created ? "已写入" : "已更新"} .env：ACCOUNT_${result.index} ${body.email}`,
       "success",
     );
-    form.reset();
+    exitEditMode();
     await loadManage();
     offerRestart();
   } catch (e) {
@@ -649,10 +715,12 @@ export default {
 
       <div class="panel" id="accountsManageBox" style="margin-top: 1.5rem;">
           <div class="panel-head">
-              <h2>添加账号（写入机器人的 .env）</h2>
+              <h2 id="accountsManageTitle">账号管理（写入机器人的 .env）</h2>
           </div>
           <p class="hint" id="accountsManageHint">正在读取机器人的 .env …</p>
+          <p class="hint" id="accountsManageEditNote" hidden></p>
           <form class="form" id="accountsManageForm" autocomplete="off" hidden>
+              <input type="hidden" name="index" value="">
               <div class="field-grid">
                   <label class="field field-item">邮箱
                       <input class="input" type="email" name="email" required spellcheck="false" placeholder="someone@outlook.com">
@@ -660,15 +728,15 @@ export default {
                   </label>
                   <label class="field field-item">密码
                       <input class="input" type="password" name="password" autocomplete="new-password">
-                      <span class="field-hint">用无密码 / 验证器登录时可留空</span>
+                      <span class="field-hint">留空＝保持原值（改密码时才填）</span>
                   </label>
                   <label class="field field-item">TOTP 密钥
                       <input class="input" type="password" name="totpSecret" autocomplete="off">
-                      <span class="field-hint">两步验证器的 base32 密钥，可留空</span>
+                      <span class="field-hint">base32 密钥；留空＝保持原值</span>
                   </label>
                   <label class="field field-item">恢复邮箱
                       <input class="input" type="email" name="recoveryEmail" spellcheck="false">
-                      <span class="field-hint">可留空</span>
+                      <span class="field-hint">可留空（留空＝保持原值）</span>
                   </label>
                   <label class="field field-item">地区
                       <input class="input" type="text" name="geoLocale" spellcheck="false" placeholder="auto">
@@ -681,6 +749,7 @@ export default {
               </div>
               <div class="form-actions">
                   <button type="submit" class="btn btn-primary btn-small" id="accountsManageSubmit">写入 .env</button>
+                  <button type="button" class="btn btn-small" id="accountsManageCancel" hidden>取消编辑</button>
                   <button type="button" class="btn btn-small" id="accountsManageReload">重新读取</button>
               </div>
           </form>
@@ -710,6 +779,7 @@ export default {
     });
 
     U.$("#accountsManageReload", root).addEventListener("click", () => loadManage(root));
+    U.$("#accountsManageCancel", root).addEventListener("click", () => exitEditMode());
     loadManage(root);
   },
 
