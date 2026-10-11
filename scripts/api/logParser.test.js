@@ -361,3 +361,25 @@ test('marks Edge browsing partial when the local maximum ends before Microsoft r
     assert.equal(finished.reportsCompleted, 6)
     assert.equal(finished.reportsTotal, 6)
 })
+
+test('parses the on-disk envelope and keeps a negative points delta', () => {
+    // The writer prepends a bare timestamp the IPC copy lacks, and a claim can return a negative
+    // delta; both were lost - files parsed to nothing and the deduction vanished from the breakdown.
+    const envelope = line('account.n', 'ACCOUNT-START', '开始处理账户: account.n@example.com | geoLocale: auto | locale: en-CN | 缓存区域: CN')
+    const written = `2026-10-11 01:48:22.463 ${envelope}`
+    const fromFile = parseLogLine(written)
+
+    assert.equal(fromFile.parsed, true)
+    assert.equal(fromFile.ts, parseLogLine(envelope).ts)
+    assert.equal(fromFile.user, 'account.n')
+
+    const state = createRunState()
+    apply(state, written)
+    apply(state, line('account.n', 'URL-REWARD', 'UrlReward 完成 | offerId=X | pointsGained=30 | currentBalance=430'))
+    apply(state, line('account.n', 'CLAIM-BONUS-POINTS', '领取奖励积分完成 | acknowledged=true | pointsGained=-9 | currentBalance=421'))
+
+    const bySource = state.accounts['account.n@example.com'].live.bySource
+    assert.equal(bySource.urlReward, 30)
+    assert.equal(bySource.claimBonus, -9)
+    assert.equal(Object.values(bySource).reduce((a, b) => a + b, 0), 21)
+})

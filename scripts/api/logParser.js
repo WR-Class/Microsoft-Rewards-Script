@@ -4,7 +4,10 @@ export function stripAnsi(str) {
     return typeof str === 'string' ? str.replace(ANSI_RE, '') : str
 }
 
-const LINE_RE = /^\[([^\]]*)\] \[([^\]]*)\] \[(INFO|WARN|ERROR|DEBUG)\] (MAIN|MOBILE|DESKTOP) \[([^\]]*)\] ([\s\S]*)$/
+// 日志写入器会在行首再加一个裸时间戳（例如 2026-10-11 02:21:08.915），而走 IPC 的
+// cleanMsg 没有它，所以同一个格式在文件和实时流里长得不一样。前缀设为可选，且用非捕获组，
+// 这样 ts 仍然是中括号里那个时间，下游字段口径不变。此前带前缀的日志文件 100% 解析失败。
+const LINE_RE = /^(?:\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} )?\[([^\]]*)\] \[([^\]]*)\] \[(INFO|WARN|ERROR|DEBUG)\] (MAIN|MOBILE|DESKTOP) \[([^\]]*)\] ([\s\S]*)$/
 
 const SEVERITY = { debug: 0, info: 1, warn: 2, error: 3 }
 
@@ -207,7 +210,9 @@ function applyLivePoints(state, entry) {
             acc.live.balance = balance
             changed = true
         }
-        if (gained > 0) {
+        // 只跳过 0 和缺值：扣分是真实存在的负增量（实测 CLAIM-BONUS-POINTS 返回 pointsGained=-9，
+        // 余额 490→481），早先的 gained > 0 会把它整条丢掉，导致按来源加总比权威值高出这一笔。
+        if (gained != null && gained !== 0) {
             acc.live.gained += gained
             acc.live.bySource[source] = (acc.live.bySource[source] || 0) + gained
             changed = true
