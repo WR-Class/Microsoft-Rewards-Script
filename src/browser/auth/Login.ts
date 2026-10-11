@@ -34,6 +34,7 @@ type LoginState =
     | 'OTP_CODE_ENTRY'
     | 'UNKNOWN'
     | 'CHROMEWEBDATA_ERROR'
+    | 'ACCOUNT_ERROR_PAGE'
 
 type SignInMethodOption = {
     index: number
@@ -117,6 +118,7 @@ export class Login {
             let iteration = 0
             let previousState: LoginState = 'UNKNOWN'
             let sameStateCount = 0
+            let reloadCount = 0
 
             while (iteration < maxIterations) {
                 if (page.isClosed()) throw new Error('Page closed unexpectedly')
@@ -146,10 +148,17 @@ export class Login {
                         `相同状态计数: ${sameStateCount}/4 状态为 "${state}"`
                     )
                     if (sameStateCount >= 4) {
+                        reloadCount++
+                        if (reloadCount > 2) {
+                            throw new Error(
+                                `状态 "${state}" 在刷新 ${reloadCount - 1} 次后仍未变化（URL: ${page.url()}），放弃重试`
+                            )
+                        }
+
                         this.bot.logger.warn(
                             this.bot.isMobile,
                             'LOGIN',
-                            `在状态 "${state}" 停滞4次循环，刷新页面`
+                            `在状态 "${state}" 停滞4次循环，刷新页面（第 ${reloadCount}/2 次）`
                         )
                         await page.reload({ waitUntil: 'domcontentloaded' })
                         await this.bot.utils.wait(3000)
@@ -200,6 +209,19 @@ export class Login {
         if (hostname === 'chromewebdata') {
             this.bot.logger.warn(this.bot.isMobile, 'DETECT-STATE', '检测到chromewebdata错误页面')
             return 'CHROMEWEBDATA_ERROR'
+        }
+
+        // account.live.com/error.htm 是微软的账户错误页（账号被拦、需要验证、被锁等）。
+        // 以前它认不出来 → UNKNOWN，而循环里 UNKNOWN 被排除在停滞检测之外（那是为了容忍
+        // 瞬时未知状态），于是既不刷新也没有出口，一直转到 25 次迭代上限，最后抛一个
+        // 没有任何信息量的"登录超时"。6 次登录超时（10-09 至 10-11）全部卡在这一页。
+        if (hostname === 'account.live.com' && /^\/error/i.test(url.pathname)) {
+            this.bot.logger.warn(
+                this.bot.isMobile,
+                'DETECT-STATE',
+                '检测到账户错误页 account.live.com/error.htm'
+            )
+            return 'ACCOUNT_ERROR_PAGE'
         }
 
         const isLocked = await this.checkSelector(page, this.selectors.accountLocked)
@@ -340,6 +362,23 @@ export class Login {
             .waitForSelector(selector, { state: 'visible', timeout: 5000 })
             .then(() => true)
             .catch(() => false)
+    }
+
+    /**
+     * 读出微软账户错误页自己写的文案，让日志里出现的是"账号被锁 / 需要验证"这类原因，
+     * 而不是一个没有信息量的"登录超时"。
+     */
+    private async readAccountErrorPage(page: Page): Promise<string> {
+        const candidates = ['#iPageTitle', 'h1', '[role="heading"]', '.errorText', 'body']
+
+        for (const selector of candidates) {
+            const text = (await page.locator(selector).first().innerText({ timeout: 2000 }).catch(() => ''))
+                .replace(/\s+/g, ' ')
+                .trim()
+            if (text) return text.slice(0, 200)
+        }
+
+        return '页面未提供可读文案'
     }
 
     private normalizeSignInText(value: string): string {
@@ -572,6 +611,17 @@ export class Login {
                 }
                 this.bot.logger.error(this.bot.isMobile, 'LOGIN', `账户错误: ${errorMsg}`)
                 throw new Error(`Microsoft login error: ${errorMsg}`)
+            }
+
+            // 微软账户错误页：这是终点，不是可以重试的中间状态
+            case 'ACCOUNT_ERROR_PAGE': {
+                const detail = await this.readAccountErrorPage(page)
+                this.bot.logger.error(
+                    this.bot.isMobile,
+                    'LOGIN',
+                    `账户错误页：${detail} —— 该账号需要在真实浏览器里处理，本轮跳过`
+                )
+                throw new Error(`账户错误页: ${detail}`)
             }
 
             case 'LOGGED_IN':
