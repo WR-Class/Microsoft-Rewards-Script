@@ -585,18 +585,65 @@ export default class BrowserFunc {
         return [...seen]
     }
 
+    /**
+     * 读取 storageState，失败时先离开当前页面再试一次。
+     *
+     * browserContext.storageState() 会碰当前页面，所以当它停在某个加载失败的页面上
+     * （例如随机点开的搜索结果 ymt.com）时会抛 net::ERR_FAILED，整份会话就丢了 ——
+     * 下一轮得重新登录。这里在重试前把活动页带回一个空白页；两次都失败就返回 null，
+     * 让本轮已经拿到的积分不受影响。
+     */
+    private async readStorageState(
+        browser: BrowserContext
+    ): Promise<Awaited<ReturnType<BrowserContext['storageState']>> | null> {
+        try {
+            return await browser.storageState()
+        } catch (error) {
+            this.bot.logger.warn(
+                this.bot.isMobile,
+                'CLOSE-BROWSER',
+                `读取会话失败，先离开当前页面后重试: ${error instanceof Error ? error.message : String(error)}`
+            )
+        }
+
+        try {
+            const pages = browser.pages()
+            const active = pages.length > 0 ? pages[pages.length - 1] : null
+
+            if (active && !active.isClosed()) {
+                await active
+                    .goto('about:blank', { waitUntil: 'domcontentloaded', timeout: 5000 })
+                    .catch(() => {})
+            }
+
+            return await browser.storageState()
+        } catch (retryError) {
+            this.bot.logger.error(
+                this.bot.isMobile,
+                'CLOSE-BROWSER',
+                `保存会话仍失败，本轮会话未保存: ${
+                    retryError instanceof Error ? retryError.message : String(retryError)
+                }`
+            )
+            return null
+        }
+    }
+
     async closeBrowser(browser: BrowserContext, email: string, persistSession = true) {
         const rootBrowser = browser.browser?.() || null
 
         try {
             if (persistSession) {
-                const storageState = await browser.storageState()
-                this.bot.logger.debug(
-                    this.bot.isMobile,
-                    'CLOSE-BROWSER',
-                    `正在保存会话 | Cookie数=${storageState.cookies.length} | origins=${storageState.origins.length}`
-                )
-                saveStorageState(this.bot.config.sessionPath, email, this.bot.isMobile, storageState)
+                const storageState = await this.readStorageState(browser)
+
+                if (storageState) {
+                    this.bot.logger.debug(
+                        this.bot.isMobile,
+                        'CLOSE-BROWSER',
+                        `正在保存会话 | Cookie数=${storageState.cookies.length} | origins=${storageState.origins.length}`
+                    )
+                    saveStorageState(this.bot.config.sessionPath, email, this.bot.isMobile, storageState)
+                }
             }
         } catch (error) {
             if (isBrowserClosedError(error)) {
