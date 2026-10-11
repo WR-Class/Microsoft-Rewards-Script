@@ -48,8 +48,12 @@ interface BrowserSession {
 
 interface AccountStats {
     email: string
-    initialPoints: number
-    finalPoints: number
+    /**
+     * 本轮开始时的余额。null = 没有测量到（例如读到的是"部分仪表板"）。
+     * "没读到"和"余额真的是 0"是两件事，不能用一个 0 兼表两种含义。
+     */
+    initialPoints: number | null
+    finalPoints: number | null
     collectedPoints: number
     duration: number
     success: boolean
@@ -57,9 +61,27 @@ interface AccountStats {
 }
 
 interface AccountRunResult {
-    initialPoints: number
+    /** null = 基线没有测量到。不要退回 0，那会把"没读到"变成"原本是 0 分"。 */
+    initialPoints: number | null
     collectedPoints: number
     skippedForBotWarning?: boolean
+}
+
+/**
+ * 只对"已测量"的值求和：null（未知）不参与，避免一个未测量的值毁掉整轮总数。
+ * 必须配合 countKnown / unknownNote 使用 —— 跳过了多少要如实报出来，不能静默省略。
+ */
+function sumKnown(values: Array<number | null>): number {
+    return values.reduce<number>((sum, v) => sum + (v ?? 0), 0)
+}
+
+function countKnown(values: Array<number | null>): number {
+    return values.filter(v => v !== null).length
+}
+
+/** "（另有 N 个账号<label>未计入）"；没有未知时返回空串。 */
+function unknownNote(count: number, label: string): string {
+    return count > 0 ? `（另有 ${count} 个账号${label}未计入）` : ''
 }
 
 const executionContext = new AsyncLocalStorage<ExecutionContext>()
@@ -152,7 +174,9 @@ export class MicrosoftRewardsBot {
             geoLocale: 'US',
             langCode: 'en',
             timezoneOffset: '60',
-            initialPoints: 0,
+            // 未知用 NaN 表示（本库既有约定：resetUserData 与 salvage 分支都用它 +
+            // Number.isFinite 判断）。真实基线在读到可信仪表板后写入。
+            initialPoints: Number.NaN,
             currentPoints: 0,
             gainedPoints: 0
         }
@@ -389,14 +413,16 @@ export class MicrosoftRewardsBot {
 
             if (this.activeWorkers <= 0) {
                 const totalCollectedPoints = allAccountStats.reduce((sum, s) => sum + s.collectedPoints, 0)
-                const totalInitialPoints = allAccountStats.reduce((sum, s) => sum + s.initialPoints, 0)
-                const totalFinalPoints = allAccountStats.reduce((sum, s) => sum + s.finalPoints, 0)
+                const unknownBaselines = allAccountStats.length - countKnown(allAccountStats.map(s => s.initialPoints))
+                const unknownFinals = allAccountStats.length - countKnown(allAccountStats.map(s => s.finalPoints))
+                const totalInitialPoints = sumKnown(allAccountStats.map(s => s.initialPoints))
+                const totalFinalPoints = sumKnown(allAccountStats.map(s => s.finalPoints))
                 const totalDurationMinutes = ((Date.now() - runStartTime) / 1000 / 60).toFixed(1)
 
                 this.logger.info(
                     'main',
                     'RUN-END',
-                    `全部账户完成 | 处理账户数=${allAccountStats.length} | 获得积分=${totalCollectedPoints} | 原余额=${totalInitialPoints} | 现余额=${totalFinalPoints} | 运行分钟数=${totalDurationMinutes}`,
+                    `全部账户完成 | 处理账户数=${allAccountStats.length} | 获得积分=${totalCollectedPoints} | 原余额=${totalInitialPoints}${unknownNote(unknownBaselines, '基线未知，')} | 现余额=${totalFinalPoints}${unknownNote(unknownFinals, '余额未知，')} | 运行分钟数=${totalDurationMinutes}`,
                     'green'
                 )
 
@@ -454,8 +480,10 @@ export class MicrosoftRewardsBot {
 
     private buildSummaryMessage(accountStats: AccountStats[], runStartTime: number, hadWorkerFailure: boolean): string {
         const totalCollectedPoints = accountStats.reduce((sum, s) => sum + s.collectedPoints, 0)
-        const totalInitialPoints = accountStats.reduce((sum, s) => sum + s.initialPoints, 0)
-        const totalFinalPoints = accountStats.reduce((sum, s) => sum + s.finalPoints, 0)
+        const unknownBaselines = accountStats.length - countKnown(accountStats.map(s => s.initialPoints))
+        const unknownFinals = accountStats.length - countKnown(accountStats.map(s => s.finalPoints))
+        const totalInitialPoints = sumKnown(accountStats.map(s => s.initialPoints))
+        const totalFinalPoints = sumKnown(accountStats.map(s => s.finalPoints))
         const totalDurationMinutes = ((Date.now() - runStartTime) / 1000 / 60).toFixed(1)
         const timestamp = formatLocalTimestamp(new Date())
 
@@ -464,7 +492,7 @@ export class MicrosoftRewardsBot {
             `状态: ${hadWorkerFailure ? '异常' : '完成'}`,
             `账户数: ${accountStats.length}`,
             `总收集积分: +${totalCollectedPoints}`,
-            `原始总计: ${totalInitialPoints} → 新总计: ${totalFinalPoints}`,
+            `原始总计: ${totalInitialPoints}${unknownNote(unknownBaselines, '基线未知，')} → 新总计: ${totalFinalPoints}${unknownNote(unknownFinals, '余额未知，')}`,
             `总运行时间: ${totalDurationMinutes}分钟`
         ]
 
@@ -476,7 +504,7 @@ export class MicrosoftRewardsBot {
                 const duration = Number.isFinite(stat.duration) ? stat.duration.toFixed(1) : String(stat.duration)
                 const error = stat.error ? ` | ${stat.error}` : ''
                 lines.push(
-                    `${stat.email} | +${stat.collectedPoints} | ${stat.initialPoints}→${stat.finalPoints} | ${duration}秒 | ${status}${error}`
+                    `${stat.email} | +${stat.collectedPoints} | ${stat.initialPoints ?? '?'}→${stat.finalPoints ?? '?'} | ${duration}秒 | ${status}${error}`
                 )
             }
         }
@@ -585,8 +613,11 @@ export class MicrosoftRewardsBot {
 
                 if (result) {
                     const collectedPoints = result.collectedPoints ?? 0
-                    const accountInitialPoints = result.initialPoints ?? 0
-                    const accountFinalPoints = accountInitialPoints + collectedPoints
+                    const accountInitialPoints = result.initialPoints
+                    // 基线未知时最终余额也是未知的 —— 不能让 null + number 悄悄算出一个数
+                    // （JS 里 null + 5 === 5，那会把"没读到"伪装成一个具体余额）。
+                    const accountFinalPoints =
+                        accountInitialPoints === null ? null : accountInitialPoints + collectedPoints
 
                     if (result.skippedForBotWarning) {
                         accountStats.push({
@@ -678,7 +709,7 @@ export class MicrosoftRewardsBot {
 
                 accountStats.push({
                     email: accountEmail,
-                    initialPoints: 0,
+                    initialPoints: null,
                     finalPoints: 0,
                     collectedPoints: 0,
                     duration: parseFloat(durationSeconds),
@@ -690,14 +721,16 @@ export class MicrosoftRewardsBot {
 
         if (this.config.clusters <= 1 && cluster.isPrimary) {
             const totalCollectedPoints = accountStats.reduce((sum, s) => sum + s.collectedPoints, 0)
-            const totalInitialPoints = accountStats.reduce((sum, s) => sum + s.initialPoints, 0)
-            const totalFinalPoints = accountStats.reduce((sum, s) => sum + s.finalPoints, 0)
+            const unknownBaselines = accountStats.length - countKnown(accountStats.map(s => s.initialPoints))
+            const unknownFinals = accountStats.length - countKnown(accountStats.map(s => s.finalPoints))
+            const totalInitialPoints = sumKnown(accountStats.map(s => s.initialPoints))
+            const totalFinalPoints = sumKnown(accountStats.map(s => s.finalPoints))
             const totalDurationMinutes = ((Date.now() - runStartTime) / 1000 / 60).toFixed(1)
 
             this.logger.info(
                 'main',
                 'RUN-END',
-                `全部账户完成 | 处理账户数=${accountStats.length} | 获得积分=${totalCollectedPoints} | 原余额=${totalInitialPoints} | 现余额=${totalFinalPoints} | 运行分钟数=${totalDurationMinutes}`,
+                `全部账户完成 | 处理账户数=${accountStats.length} | 获得积分=${totalCollectedPoints} | 原余额=${totalInitialPoints}${unknownNote(unknownBaselines, '基线未知，')} | 现余额=${totalFinalPoints}${unknownNote(unknownFinals, '余额未知，')} | 运行分钟数=${totalDurationMinutes}`,
                 'green'
             )
 
@@ -1218,7 +1251,7 @@ export class MicrosoftRewardsBot {
                     )
 
                     return {
-                        initialPoints: 0,
+                        initialPoints: null,
                         collectedPoints: 0
                     }
                 }
