@@ -558,6 +558,8 @@ export function summarizeRunState(state) {
         totals: state.totals,
         finished: state.finished,
         pendingDelay: state.pendingDelay,
+        // Set by the API's startup replay (see logReplay.js); null while a live run owns the state.
+        backfill: state.backfill ?? null,
         live: {
             currentAccount: state.currentEmail,
             currentBalance: current?.live?.balance ?? null,

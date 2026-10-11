@@ -17,6 +17,7 @@ import {
 import { readSchedule, writeSchedule } from './scheduleStore.js'
 import { deleteStoredSessions, listStoredSessions } from './sessionStore.js'
 import { resolveRunCommand } from './runCommand.js'
+import { replayLogFiles } from './logReplay.js'
 import {
     log,
     parseArgs,
@@ -129,6 +130,21 @@ const ALLOW_SCHEDULE_WRITE = envBool('API_ALLOW_SCHEDULE_WRITE', false)
 const RUN_HISTORY = integerSetting('API_RUN_HISTORY', envStr('API_RUN_HISTORY'), 20)
 const DIAG_DIR = envStr('API_DIAGNOSTICS_DIR') ?? path.join(projectRoot, 'diagnostics')
 
+// Rebuild the idle-time run state from the bot's own log files at startup, so a restart does not
+// lose the last run. 0 disables it. A new run replaces the state anyway (ProcessManager.start()),
+// so this only ever seeds the window between restarts.
+const LOG_DIR = envStr('API_LOG_DIR') ?? path.join(projectRoot, 'logs')
+const BACKFILL_FILES = integerSetting('API_LOG_BACKFILL_FILES', envStr('API_LOG_BACKFILL_FILES'), 1, {
+    min: 0,
+    max: 30
+})
+const BACKFILL_MAX_BYTES = integerSetting(
+    'API_LOG_BACKFILL_MAX_BYTES',
+    envStr('API_LOG_BACKFILL_MAX_BYTES'),
+    4000000,
+    { min: 65536, max: 64000000 }
+)
+
 const { command, args } = resolveRunCommand({ projectRoot })
 
 const pm = new ProcessManager({
@@ -141,6 +157,22 @@ const pm = new ProcessManager({
     name: pkgName,
     version: pkgVersion
 })
+
+if (BACKFILL_FILES > 0) {
+    const backfill = replayLogFiles({
+        dir: LOG_DIR,
+        state: pm.runState,
+        files: BACKFILL_FILES,
+        maxBytes: BACKFILL_MAX_BYTES
+    })
+    pm.runState.backfill = backfill
+    log(
+        'INFO',
+        `Log backfill: ${backfill.files.length} file(s), ${backfill.parsed}/${backfill.lines} line(s) parsed, ` +
+            `${backfill.accounts} account(s), last run total ${backfill.runTotal ?? 'unknown'}` +
+            `${backfill.truncated ? ' (byte ceiling applied)' : ''}.`
+    )
+}
 
 const startedAt = Date.now()
 
