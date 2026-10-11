@@ -27,6 +27,7 @@
         "clear-sessions": "node ./scripts/main/clearSessions.js",
         "open-session": "node ./scripts/main/browserSession.js -email",
         "manual-login": "node ./scripts/main/manualLogin.js",
+        "quota-report": "node ./scripts/main/quotaReport.js",
         "clawbot:login": "node -r ts-node/register/transpile-only ./scripts/main/clawbotLogin.cjs",
         "test:clawbot-smoke": "node -r ts-node/register/transpile-only ./scripts/tests/smokeClawbot.cjs"
     },

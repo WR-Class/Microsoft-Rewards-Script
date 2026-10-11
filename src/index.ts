@@ -941,9 +941,26 @@ export class MicrosoftRewardsBot {
                     }
                 }
 
-                this.userData.initialPoints = data.dashboard.userStatus.availablePoints
-                this.userData.currentPoints = data.dashboard.userStatus.availablePoints
-                const initialPoints = this.userData.initialPoints ?? 0
+                // 基线只能来自可信的完整仪表板。走 flyout 兜底时拿到的是"部分仪表板"，
+                // 里面的 availablePoints 可能是 0 —— 那不是"账号余额为 0"，而是"没读到"。
+                // 之前这里直接采信、并把缺失兜成 0，于是差额被算成了整个余额：
+                // 10-11 的 chuzheng973528 报出 +295（原余额 0、现余额 295），
+                // 10-09 的 chanyuyiyan531256 报出 +320，都是这么来的。
+                const baseline = data.dashboard.userStatus.availablePoints
+                const baselineTrustworthy = !this.browser.func.usedFlyoutDashboardFallback()
+
+                this.userData.initialPoints = baselineTrustworthy ? baseline : Number.NaN
+                this.userData.currentPoints = baseline
+
+                if (!baselineTrustworthy) {
+                    this.logger.warn(
+                        'main',
+                        'FLOW',
+                        `初始余额不可信（部分仪表板）| 读到=${baseline} | 本轮不报差额 | 账户=${accountEmail}`
+                    )
+                }
+
+                const initialPoints = this.userData.initialPoints ?? Number.NaN
 
                 const browserEarnable = await this.browser.func.getBrowserEarnablePoints(data)
                 let appEarnable: AppEarnablePoints | null = null
@@ -1189,6 +1206,21 @@ export class MicrosoftRewardsBot {
                             error instanceof Error ? error.message : String(error)
                         }`
                     )
+                }
+
+                // 基线不可信时不报差额：宁可在日志里说"不知道"，也不给出一个
+                // 把整个余额当成当日产出的数字。
+                if (!Number.isFinite(initialPoints)) {
+                    this.logger.warn(
+                        'main',
+                        'FLOW',
+                        `积分已收集（基线未知，不报差额） | 现余额=${finalPoints} | 账户=${accountEmail}`
+                    )
+
+                    return {
+                        initialPoints: 0,
+                        collectedPoints: 0
+                    }
                 }
 
                 const collectedPoints = finalPoints - initialPoints

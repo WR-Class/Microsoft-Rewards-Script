@@ -21,6 +21,14 @@ export default class BrowserFunc {
 
     private useFlyoutDashboardFallback = false
 
+    /**
+     * 上一次 getDashboardData 是否走了 Bing flyout 兜底（即日志里的"部分仪表板"）。
+     * 走兜底时 availablePoints 可能是残缺载荷里的 0，不能当成"账号余额为 0"。
+     */
+    public usedFlyoutDashboardFallback(): boolean {
+        return this.useFlyoutDashboardFallback
+    }
+
     private botMetricsLoggedPlatforms = new Set<string>()
 
     constructor(bot: MicrosoftRewardsBot) {
