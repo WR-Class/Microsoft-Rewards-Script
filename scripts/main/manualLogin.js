@@ -312,11 +312,33 @@ async function runPlatform({ account, config, dbPath, platform, fresh }) {
         ? ['--ignore-certificate-errors', '--ignore-certificate-errors-spki-list', '--ignore-ssl-errors']
         : []
 
-    const browser = await chromium.launch({
-        headless: false,
-        ...(proxy ? { proxy } : {}),
-        args: [...BROWSER_ARGS, ...sandboxArgs, ...certArgs]
-    })
+    // Mirror the main program's rule (src/browser/Browser.ts:52-56): 'chromium' means the
+    // bundled build, any other value names a system browser and is passed as `channel`.
+    // Without this the helper asked for the bundled Chromium even on a machine configured
+    // for system Chrome, and died with "Executable doesn't exist ... chromium-1228" - the
+    // bundled build is not installed here, only the system channel is.
+    const channel = config.browserChannel ?? 'chromium'
+    const nativeChannel = channel === 'chromium' ? null : channel
+    log('INFO', `Browser channel: ${nativeChannel ? `system ${nativeChannel}` : 'bundled chromium'}`)
+
+    let browser
+    try {
+        browser = await chromium.launch({
+            headless: false,
+            ...(nativeChannel ? { channel: nativeChannel } : {}),
+            ...(proxy ? { proxy } : {}),
+            args: [...BROWSER_ARGS, ...sandboxArgs, ...certArgs]
+        })
+    } catch (error) {
+        if (nativeChannel) {
+            log(
+                'ERROR',
+                `无法启动系统 ${nativeChannel}（config.json 的 browserChannel=${channel}）。` +
+                    '本机没装就改 browserChannel，或运行 npm run install:browser 安装内置 Chromium。'
+            )
+        }
+        throw error
+    }
 
     let interrupted = false
     const stop = async signal => {
