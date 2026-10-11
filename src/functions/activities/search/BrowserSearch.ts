@@ -298,7 +298,35 @@ class PointsTracker implements SearchTracker {
     }
 
     async measure(): Promise<number> {
-        const updated = await this.searchProgress.getMissing(this.isMobile)
+        // 这一步只是"读数"，不是搜索本身。查分接口抖动（503 等）绝不能终止整段搜索会话 ——
+        // 否则一次读数失败就会丢掉本次已经赚到的积分，最坏情况（第 1 次搜索就抖动）是整段 0 分。
+        let updated: MissingSearchPoints | undefined
+
+        try {
+            updated = await this.searchProgress.getMissing(this.isMobile)
+        } catch (error) {
+            this.bot.logger.warn(
+                this.isMobile,
+                this.context,
+                `查询剩余积分失败，稍后重试一次 | ${error instanceof Error ? error.message : String(error)}`
+            )
+            await this.bot.utils.wait(3000)
+
+            try {
+                updated = await this.searchProgress.getMissing(this.isMobile)
+            } catch (retryError) {
+                this.bot.logger.warn(
+                    this.isMobile,
+                    this.context,
+                    `查询剩余积分仍失败，本轮跳过计量并继续搜索 | ${retryError instanceof Error ? retryError.message : String(retryError)}`
+                )
+            }
+        }
+
+        // 两次都没读到：不更新 missing（保留上次已知值），返回 0 让搜索循环继续。
+        // 循环终止由 stats.stagnant 兜底 —— 连续 stagnantLimit 次无进展即正常退出，不会死循环。
+        if (!updated) return 0
+
         const gained = Math.max(0, this.missing.totalPoints - updated.totalPoints)
         this.missing = updated
 
