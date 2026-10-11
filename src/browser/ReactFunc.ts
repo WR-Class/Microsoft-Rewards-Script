@@ -72,6 +72,23 @@ export interface PageSnapshot {
     account: AccountState
 }
 
+/** 登录/跳转壳的特征。 */
+const LOGIN_SHELL_RE = /account\.live\.com|login\.live\.com|identity\/(confirm|oauth)|\/consumers\/fido\//i
+
+/** 面板渲染完成的标记，与 BrowserFunc.bootstrap 的判定保持一致。 */
+const REWARDS_SECTION_RE = /<section\b[^>]*\bid=["']dailyset["']/i
+
+/** RSC flight 载荷标记。 */
+const FLIGHT_PUSH_RE = /self\.__next_f\.push\(/
+
+/**
+ * 取回的 HTML 值不值得解析：
+ * - ok：确实是渲染过的 Rewards 页面
+ * - login-shell：登录/跳转壳，解析出来只会是空快照
+ * - no-flight：是 Rewards 域名但没有 RSC 载荷，页面标记可能已变化
+ */
+export type RewardsPageVerdict = 'ok' | 'login-shell' | 'no-flight'
+
 export default class ReactFunc {
     private bot: MicrosoftRewardsBot
 
@@ -129,6 +146,22 @@ export default class ReactFunc {
         return Number.isSafeInteger(value) && value >= 0 ? value : null
     }
 
+    /**
+     * 判断取回的 HTML 是不是一个渲染过的 Rewards 页面。
+     * 正常的 Rewards 页面里也会出现 account.live.com 链接，所以只有在同时缺少面板标记时
+     * 才判为登录壳，避免把真实页面误挡掉。
+     */
+    public classifyRewardsPage(html: string | readonly string[] | null | undefined): RewardsPageVerdict {
+        const pages = html == null ? [] : typeof html === 'string' ? [html] : html
+        const joined = pages.join('\n')
+
+        if (!joined.trim()) return 'login-shell'
+        if (LOGIN_SHELL_RE.test(joined) && !REWARDS_SECTION_RE.test(joined)) return 'login-shell'
+        if (FLIGHT_PUSH_RE.test(joined) || REWARDS_SECTION_RE.test(joined)) return 'ok'
+
+        return 'no-flight'
+    }
+
     private concatFlightChunks(html: string | readonly string[]): string {
         try {
             const pushRe = /self\.__next_f\.push\(\[1,\s*"((?:[^"\\]|\\.)*)"\]\)/g
@@ -167,10 +200,15 @@ export default class ReactFunc {
             )
 
             if (count === 0) {
-                this.bot.logger.warn(
+                // 只说明这一次的实际原因；页面级调用点负责告警与计数（REACT-PARSE-EMPTY）。
+                const reason =
+                    this.classifyRewardsPage(pages) === 'login-shell'
+                        ? '取到的是登录/跳转页，不是 Rewards 页面'
+                        : '页面没有 RSC flight 载荷，标记可能已变化'
+                this.bot.logger.debug(
                     this.bot.isMobile,
                     'REACT-PARSE',
-                    '未找到 __next_f flight 代码块 - 页面可能不是 RSC 渲染或标记已变化'
+                    `无 flight 代码块 | 原因=${reason}`
                 )
             }
 

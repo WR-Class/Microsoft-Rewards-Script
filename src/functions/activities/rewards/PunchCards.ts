@@ -88,11 +88,15 @@ export class PunchCards extends BaseActivity {
 
     private async getParentQuests(): Promise<ParentQuest[] | null> {
         try {
-            const earn = await this.bot.browser.func.getRewardsPageHtml(URLs.rewards.earn, '/earn')
-            if (!earn) {
+            const earnHtml = await this.bot.browser.func.getRewardsPageHtml(URLs.rewards.earn, '/earn')
+            if (!earnHtml) {
                 this.bot.logger.warn(this.bot.isMobile, 'PUNCHCARD', '/earn 不可用 - 无法获取任务列表')
                 return null
             }
+
+            // 守卫已按 REACT-PARSE-EMPTY 记账，这里不再重复告警
+            const earn = this.bot.browser.func.verifyRewardsSources([earnHtml], 'PUNCHCARD /earn')[0]
+            if (!earn) return null
 
             const parents = this.bot.browser.react.snapshotQuestList(earn)
             if (parents.length) return parents
@@ -160,6 +164,16 @@ export class PunchCards extends BaseActivity {
 
         for (const child of ordered) {
             const apiChild = apiChildById.get(child.offerId)
+
+            if (this.bot.reportedQuestChildren.has(`${parentId}|${child.offerId}`)) {
+                remaining += 1
+                this.bot.logger.debug(
+                    this.bot.isMobile,
+                    'PUNCHCARD',
+                    `跳过 ${child.offerId}：本轮已获得积分，不重复上报`
+                )
+                continue
+            }
 
             if (!child.reportable) {
                 remaining += 1
@@ -274,6 +288,7 @@ export class PunchCards extends BaseActivity {
             if (gained > 0) {
                 this.bot.userData.currentPoints = newBalance
                 this.bot.userData.gainedPoints = (this.bot.userData.gainedPoints ?? 0) + gained
+                this.bot.reportedQuestChildren.add(`${parentId}|${child.offerId}`)
             }
 
             this.bot.logger.info(

@@ -98,7 +98,10 @@ export class EnsureStreakProtection extends BaseActivity {
                 this.bot.logger.warn(this.bot.isMobile, 'ENABLE-STREAK-PROTECTION', '验证请求失败')
                 return null
             }
-            return this.bot.browser.react.getStreakProtection(html)
+            const [verified] = this.bot.browser.func.verifyRewardsSources([html], 'ENABLE-STREAK-PROTECTION /earn')
+            if (!verified) return null
+
+            return this.bot.browser.react.getStreakProtection(verified)
         } catch (error) {
             this.bot.logger.warn(
                 this.bot.isMobile,

@@ -320,11 +320,13 @@ export default class BrowserFunc {
             // pull /dashboard HTML to capture chunks that /earn doesn't show
             const dashboardHtml = await this.fetchBootstrapHtml(page, URLs.rewards.dashboard, '/dashboard')
 
-            const sources = [earnRaw, earnDom, dashboardHtml].filter(Boolean)
-            const snapshot = this.bot.browser.react.snapshotPage(sources)
-            this.bot.reactSnapshot = snapshot
-            if (this.bot.isMobile) this.bot.reactSnapshots.mobile = snapshot
-            else this.bot.reactSnapshots.desktop = snapshot
+            const sources = this.verifyRewardsSources([earnRaw, earnDom, dashboardHtml], 'bootstrap')
+            if (sources.length) {
+                const snapshot = this.bot.browser.react.snapshotPage(sources)
+                this.bot.reactSnapshot = snapshot
+                if (this.bot.isMobile) this.bot.reactSnapshots.mobile = snapshot
+                else this.bot.reactSnapshots.desktop = snapshot
+            }
 
             // discovered from chunks referenced by either page
             this.bot.nextActions = await this.resolveActionIds(page, sources)
@@ -343,7 +345,10 @@ export default class BrowserFunc {
                 const retryDom = await page.content().catch(() => '')
                 const retryEarn = await this.fetchBootstrapHtml(page, URLs.rewards.earn, '/earn')
                 const retryDashboard = await this.fetchBootstrapHtml(page, URLs.rewards.dashboard, '/dashboard')
-                const retrySources = [retryDom, retryEarn, retryDashboard].filter(Boolean)
+                const retrySources = this.verifyRewardsSources(
+                    [retryDom, retryEarn, retryDashboard],
+                    'bootstrap-retry'
+                )
 
                 dashboardRendered = /<section\b[^>]*\bid=["']dailyset["']/i.test(retrySources.join('\n'))
 
@@ -363,7 +368,7 @@ export default class BrowserFunc {
                 )
             }
 
-            if (!this.bot.reactSnapshot.offers.length) {
+            if (!this.bot.reactSnapshot?.offers.length) {
                 this.bot.logger.warn(
                     this.bot.isMobile,
                     'BOOTSTRAP',
@@ -382,7 +387,7 @@ export default class BrowserFunc {
             this.bot.logger.info(
                 this.bot.isMobile,
                 'BOOTSTRAP',
-                `上下文就绪 | actions=${Object.keys(this.bot.nextActions).length} | 可上报=${this.bot.reactSnapshot.reportable.length} | 可用积分=${this.bot.reactSnapshot.account.availablePoints}`
+                `上下文就绪 | actions=${Object.keys(this.bot.nextActions).length} | 可上报=${this.bot.reactSnapshot?.reportable.length ?? 0} | 可用积分=${this.bot.reactSnapshot?.account.availablePoints ?? 'unknown'}`
             )
 
             this.bot.logger.info(
@@ -1000,6 +1005,29 @@ export default class BrowserFunc {
         }
     }
 
+    /**
+     * 只有确实是渲染过的 Rewards 页面才交给解析器。
+     * 登录/跳转壳解析出来是空快照，会把这一轮活动的目标静默清空 —— 比返回 null 更糟，
+     * 因为调用方本来就能处理 null。跳过时按 REACT-PARSE-EMPTY 计数，便于事后统计。
+     */
+    public verifyRewardsSources(sources: (string | null | undefined)[], label: string): string[] {
+        const pages = sources.filter((html): html is string => !!html)
+        const verdict = this.bot.browser.react.classifyRewardsPage(pages)
+
+        if (verdict === 'ok') return pages
+
+        if (verdict === 'login-shell') this.bot.reactParseSkips.loginShell++
+        else this.bot.reactParseSkips.noFlight++
+
+        this.bot.logger.warn(
+            this.bot.isMobile,
+            'REACT-PARSE-EMPTY',
+            `跳过解析：${verdict === 'login-shell' ? '取到的是登录/跳转页' : '页面没有 RSC 载荷'} | 来源=${label} | 本轮累计 loginShell=${this.bot.reactParseSkips.loginShell} noFlight=${this.bot.reactParseSkips.noFlight}`
+        )
+
+        return []
+    }
+
     async refreshEarnSnapshot(): Promise<PageSnapshot | null> {
         const page = this.bot.isMobile ? this.bot.mainMobilePage : this.bot.mainDesktopPage
         const usePage = !!page && !page.isClosed()
@@ -1013,7 +1041,7 @@ export default class BrowserFunc {
             fetchSnapshotPage(URLs.rewards.earn, '/earn'),
             fetchSnapshotPage(URLs.rewards.dashboard, '/dashboard')
         ])
-        const availablePages = pages.filter((html): html is string => html !== null)
+        const availablePages = this.verifyRewardsSources(pages, '/earn + /dashboard')
 
         return availablePages.length ? this.bot.browser.react.snapshotPage(availablePages) : null
     }

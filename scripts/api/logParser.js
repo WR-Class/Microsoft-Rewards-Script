@@ -146,10 +146,11 @@ function pointEventSource(title, message) {
         case 'SEARCH-BONUS':
             return message.startsWith('必应搜索完成') ? 'bonus' : null
         case 'READ-TO-EARN':
-            return (message.startsWith('文章后的积分变化') ||
-                    message.startsWith('未获得积分，停止读文赚积分') ||
-                    message.startsWith('已阅读第') ||
-                    message.startsWith('读文赚积分完成')) ? 'read' : null
+            // ReadToEarn 对同一笔积分打两行（debug 的「文章后的积分变化」和 info 的「已阅读第」），
+            // 收尾再用「读文赚积分完成」重述一次活动总计，三种形状都映射到 read 会把这一项数成
+            // 三倍（实测 90，真实 30）。只保留每篇恰好出现一次、且运行中就能看到的那种形状。
+            // 这与搜索分支的处理一致（见 applyLivePoints 里的去重说明）。
+            return message.startsWith('已阅读第') ? 'read' : null
         case 'DAILY-CHECK-IN':
             return message.startsWith('每日签到完成') ? 'checkIn' : null
         case 'CLAIM-BONUS-POINTS':
@@ -416,6 +417,11 @@ export function applyLogToRunState(state, entry) {
                     acc.geoLocale = m[2].trim()
                     acc.locale = m[3] || null
                     acc.cachedRegion = m[4] || null
+                    // bySource 和 gained 都是「本账户本轮」的口径（见 ensureAccount 的注释），
+                    // 而一个日志文件里可能有多轮，所以在这里归零。否则多轮的来源会叠加，
+                    // 与 ACCOUNT-END 写进来的权威值对不上（实测 10-09/10-10 各有两个账户如此）。
+                    acc.live.gained = 0
+                    acc.live.bySource = {}
                 }
                 state.currentEmail = m[1]
                 if (entry.user) state.userToEmail[entry.user] = m[1] // map localpart -> full email

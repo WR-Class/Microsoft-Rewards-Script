@@ -114,6 +114,17 @@ export class MicrosoftRewardsBot {
         mobile: null,
         desktop: null
     }
+    /**
+     * 本账户因取到登录/跳转壳或缺少 RSC 载荷而跳过的页面解析次数。
+     * 记在账户维度上，配合 REACT-PARSE-EMPTY 日志，避免这类静默失败只能靠翻全量日志发现。
+     */
+    public reactParseSkips = { loginShell: 0, noFlight: 0 }
+    /**
+     * 本轮已经确实拿到积分的子任务，键为 `parentId|childOfferId`。
+     * PunchCards 每轮跑两遍（移动端 + 桌面端）且每次新建实例，所以备忘录要挂在 bot 上；
+     * 只记拿到分的，返回 0 分的仍会重试（日志里见过同一子任务先 0 分、后一轮拿到 95 分）。
+     */
+    public reportedQuestChildren = new Set<string>()
     public searchTopicsCache: { key: string; topics: Promise<string[]> } | null = null
 
     public accessToken = ''
@@ -753,6 +764,8 @@ export class MicrosoftRewardsBot {
         this.fingerprintDesktop = undefined
         this.reactSnapshot = null
         this.reactSnapshots = { mobile: null, desktop: null }
+        this.reactParseSkips = { loginShell: 0, noFlight: 0 }
+        this.reportedQuestChildren = new Set()
         this.searchTopicsCache = null
 
         const apiSearch = this.config.experimental.apiSearch
