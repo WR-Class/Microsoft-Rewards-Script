@@ -89,7 +89,27 @@ export class UrlReward extends BaseActivity {
                 if (await this.retryAfterRequestFailure(promotion, allowSessionRepair)) return
             }
 
-            const newBalance = availablePoints ?? (await this.bot.browser.func.getCurrentPoints())
+            // 奖励在这一步之前已经领取成功，下面读余额只是为了显示和记账。
+            // 读数失败（一次 503 或 reqwest 抖动）不能把已成功的领取改判成失败，
+            // 更不能触发重试 —— 那会变成重复领取。
+            let newBalance = availablePoints ?? null
+
+            if (newBalance === null) {
+                try {
+                    newBalance = await this.bot.browser.func.getCurrentPoints()
+                } catch (error) {
+                    this.bot.logger.warn(
+                        this.bot.isMobile,
+                        'URL-REWARD',
+                        `已领取但余额读取失败，本轮无法核对积分 | offerId=${offerId} | acknowledged=${acknowledged} | 信息=${
+                            error instanceof Error ? error.message : String(error)
+                        }`
+                    )
+                }
+            }
+
+            if (newBalance === null) return
+
             const gainedPoints = newBalance - oldBalance
 
             this.bot.logger.debug(

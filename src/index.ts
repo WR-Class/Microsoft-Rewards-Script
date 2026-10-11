@@ -1175,7 +1175,22 @@ export class MicrosoftRewardsBot {
                     edgeBrowsingTask = null
                 }
 
-                const finalPoints = await this.browser.func.getCurrentPoints()
+                // 末次余额读取是收尾动作，不是这一轮工作的成果本身。
+                // 读失败时沿用最近一次真实读到的余额，而不是把整轮标记成失败。
+                let finalPoints = this.userData.currentPoints ?? initialPoints
+
+                try {
+                    finalPoints = await this.browser.func.getCurrentPoints()
+                } catch (error) {
+                    this.logger.warn(
+                        'main',
+                        'FLOW',
+                        `末次余额读取失败，沿用最近一次已知余额 | 余额=${finalPoints} | 账户=${accountEmail} | 信息=${
+                            error instanceof Error ? error.message : String(error)
+                        }`
+                    )
+                }
+
                 const collectedPoints = finalPoints - initialPoints
 
                 this.logger.info(
