@@ -488,6 +488,27 @@ export class Login {
         return false
     }
 
+    /**
+     * KMSI 是否已经过去。点"是"会离开 login.live.com，所以先看域名：还留在登录域上时，
+     * 再看那个用来识别 KMSI 的视频元素是否也消失了。给它几秒钟等跳转，超时不算失败。
+     *
+     * 为什么需要这个：ghostClick 用 elementHandle.evaluate 判断点击成功，而导航会销毁
+     * 那个 evaluate —— 一次成功的点击于是被读成失败。11:38:43 与 14:24:19 两次 KMSI
+     * 致命错误的页面转储标题都是 "Dashboard – Microsoft Rewards"，即程序宣布失败时
+     * 它已经登录成功了。
+     */
+    private async hasLeftKmsiPrompt(page: Page): Promise<boolean> {
+        const deadline = Date.now() + 5000
+
+        while (Date.now() < deadline) {
+            if (!page.url().includes('login.live.com')) return true
+            if (!(await this.checkSelector(page, this.selectors.kmsiVideo))) return true
+            await this.bot.utils.wait(500)
+        }
+
+        return false
+    }
+
     private logAvailableSignInMethods(options: SignInMethodOption[]): void {
         if (this.signInMethodsLogged) return
         this.signInMethodsLogged = true
@@ -859,10 +880,24 @@ export class Login {
             case 'KMSI_PROMPT': {
                 this.bot.logger.info(this.bot.isMobile, 'LOGIN', '接受KMSI提示')
                 const clicked = await this.clickPrimaryButton(page, 'KMSI')
+
                 if (!clicked) {
+                    // 点击报失败不等于没点中：点"是"会让页面跳走，而成功信号在导航中被销毁。
+                    // 先回头看一眼 KMSI 是不是已经过去，过去了就按接受处理，而不是判登录失败。
+                    if (await this.hasLeftKmsiPrompt(page)) {
+                        this.bot.logger.info(
+                            this.bot.isMobile,
+                            'LOGIN',
+                            'KMSI 提示已消失（点击触发了跳转），按接受处理'
+                        )
+                        await this.waitForIdle(page, 'after KMSI acceptance')
+                        return true
+                    }
+
                     this.bot.logger.warn(this.bot.isMobile, 'LOGIN', '无法接受KMSI提示')
                     return false
                 }
+
                 await this.waitForIdle(page, 'after KMSI acceptance')
                 this.bot.logger.info(this.bot.isMobile, 'LOGIN', 'KMSI提示已接受')
                 return true
