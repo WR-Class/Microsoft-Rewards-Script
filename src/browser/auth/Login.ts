@@ -54,6 +54,10 @@ export class Login {
     private readonly capturedUnknownUrls = new Set<string>()
     private signInMethodsLogged = false
     private passwordlessMethodSelected = false
+    // How many email-code tiles this run has already tried on the sign-in method picker.
+    // Some pages only reveal the password option one step later, behind one specific tile,
+    // so the picker rotates through them instead of clicking the first one forever.
+    private emailOptionsTried = 0
 
     private readonly selectors = {
         primaryButton: 'button[data-testid="primaryButton"]',
@@ -616,7 +620,10 @@ export class Login {
                 const methods = options.map(option => ({ option, type: this.classifySignInMethod(option) }))
                 const passwordOption = methods.find(method => method.type === 'PASSWORD')?.option
                 const authenticatorOption = methods.find(method => method.type === 'AUTHENTICATOR')?.option
-                const emailOption = methods.find(method => method.type === 'EMAIL')?.option
+                const emailOptions = methods
+                    .filter(method => method.type === 'EMAIL')
+                    .map(method => method.option)
+                const emailOption = emailOptions[0]
 
                 if (account.password && passwordOption) {
                     this.bot.logger.info(this.bot.isMobile, 'LOGIN', '密码登录可用；正在选择')
@@ -678,21 +685,33 @@ export class Login {
 
                 const emailIconOldFound = await this.checkSelector(page, this.selectors.emailIconOld)
                 if (emailOption || emailIconOldFound) {
-                    if (!canPromptForInput()) {
-                        this.bot.logger.error(
+                    const interactive = canPromptForInput()
+                    // Without a terminal the code cannot be typed - but giving up here is wrong:
+                    // the operator confirmed by hand that the security-email tile leads to a page
+                    // where signing in with a password is offered. So click the tile and let the
+                    // state loop re-detect; only the code entry itself needs the terminal.
+                    // A page that keeps showing this picker rotates to the next email tile, and the
+                    // loop's own stagnation detector bounds the attempts.
+                    const tileCount = Math.max(emailOptions.length, 1)
+                    const tilePosition = (this.emailOptionsTried % tileCount) + 1
+                    const emailTile = emailOptions.length
+                        ? emailOptions[this.emailOptionsTried % emailOptions.length]
+                        : undefined
+
+                    if (interactive) {
+                        this.bot.logger.info(this.bot.isMobile, 'LOGIN', '选择邮箱验证码登录')
+                    } else {
+                        this.bot.logger.info(
                             this.bot.isMobile,
                             'LOGIN',
-                            '没有可用的非交互登录方式；邮箱验证码回退需要交互式终端输入'
-
+                            `无交互终端：仍点击邮箱验证方式（第 ${tilePosition}/${tileCount} 个），先进入下一层再找密码登录`
                         )
-                        return false
                     }
 
-                    this.bot.logger.info(this.bot.isMobile, 'LOGIN', '选择邮箱验证码登录')
                     this.passwordlessMethodSelected = false
 
-                    const clicked = emailOption
-                        ? await this.clickSignInMethodOption(page, emailOption)
+                    const clicked = emailTile
+                        ? await this.clickSignInMethodOption(page, emailTile)
                         : await this.bot.browser.utils.ghostClick(page, this.selectors.emailIconOld)
 
                     if (!clicked) {
@@ -700,7 +719,11 @@ export class Login {
                         return false
                     }
 
+                    this.emailOptionsTried++
                     await this.waitForIdle(page, 'after email method selection')
+
+                    if (!interactive) return true
+
                     await this.codeLogin.handle(page)
                     return true
                 }
