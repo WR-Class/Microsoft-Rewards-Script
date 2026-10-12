@@ -905,6 +905,22 @@ class Store {
         });
         break;
       }
+      case "account-balance-read": {
+        // 上游标注"初始余额不可信"时给出的那个读数。它不是一次完成：只写一条余额快照
+        // （points=N、gained=null），不碰 status、不调 _scheduleAutoCloseCheck ——
+        // 读一条余额不等于跑完一次，把它当完成会让运行提前收尾。
+        // 去重靠已有的秒级唯一索引 + insertHistory 的 INSERT OR IGNORE，重放不会重复。
+        if (event.email && event.newPoints != null) {
+          this.stmts.insertHistory.run(
+            event.email,
+            event.ts,
+            event.newPoints,
+            null,
+            null,
+          );
+        }
+        break;
+      }
       case "generic": {
         if (event.level === "warn" || event.level === "error") {
           this._pushActivity(event);

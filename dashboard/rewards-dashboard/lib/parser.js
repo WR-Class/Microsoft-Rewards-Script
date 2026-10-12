@@ -40,6 +40,11 @@ const ACCOUNT_END_RE =
 const FLOW_POINTS_COLLECTED_RE =
   /^积分已收集（[^）]*）\s*\|\s*(?:currentBalance|现余额)=(-?\d+|null)\s*\|\s*(?:account|账户)=(\S+)$/;
 // English "email: message"; the fork logs "email | 错误=message".
+// 「初始余额不可信（部分仪表板）| 读到=N | 本轮不报差额 | 账户=x」：上游自己说开局余额
+// 不可信，所以本轮不报差额。但"读到"的那个值是目前唯一能填上余额的读数 —— 按
+// "读数是读数、差额是结论"的原则接住它：只记一条余额快照，绝不当作一次完成。
+const FLOW_INITIAL_UNTRUSTED_RE =
+  /^初始余额不可信（[^）]*）\|\s*读到=(-?\d+|null)\s*\|\s*本轮不报差额\s*\|\s*账户=(\S+@\S+)\s*$/;
 const ACCOUNT_ERR_RE = /^(\S+@\S+)(?::\s*|\s*\|\s*错误=)([\s\S]*)$/;
 
 // src/index.ts's per-account flow wrapper (Mobile.ts / Desktop.ts) logs this
@@ -223,6 +228,20 @@ function parseLine(rawLine) {
           oldPoints: null,
           newPoints: numOrNull(fm[1]),
           durationSec: null, // 这一行不带持续秒数
+        };
+      }
+      // 余额读数，不是完成。store 里对应 account-balance-read：只写一条历史快照，
+      // 不改 status、不算 resolved —— 读一条余额不等于跑完一次。
+      const fu = FLOW_INITIAL_UNTRUSTED_RE.exec(message);
+      if (fu) {
+        return {
+          ...base,
+          kind: "account-balance-read",
+          email: fu[2],
+          newPoints: numOrNull(fu[1]),
+          gained: null, // 上游明说"本轮不报差额"，不把读数伪装成差额
+          oldPoints: null,
+          durationSec: null,
         };
       }
       // 失败行。复用已有的 account-error 事件类型（不新增 kind），因为 store 的
