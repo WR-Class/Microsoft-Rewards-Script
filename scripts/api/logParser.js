@@ -124,7 +124,11 @@ const RE = {
     // 两个形态都要认：`积分已收集（基线未知，不报差额） | 现余额=500 | 账户=x`（没有
     // 获得积分）和 `积分已收集 | 获得积分=315 | 现余额=315 | 账户=x`。
     // 可选部分一律用非捕获组 (?:…)：捕获组下标一变，下面 m[1]/m[2]/m[3] 就会静默取错字段。
-    flowCollected: /^积分已收集(?:（[^）]*）)? \| (?:获得积分=(-?\d+|null) \| )?现余额=(-?\d+|null) \| 账户=(\S+@\S+)/
+    flowCollected: /^积分已收集(?:（[^）]*）)? \| (?:获得积分=(-?\d+|null) \| )?现余额=(-?\d+|null) \| 账户=(\S+@\S+)/,
+    // 上游自己标注"初始余额不可信"，所以本轮不报差额 —— 但"读到"的那个值仍是目前唯一
+    // 能填上余额的读数（10-12 一天 32 条，此前两个解析器都不认它）。用它当余额、界面
+    // 按近似值显示；gained 继续留 null，不把不可信的读数伪装成可信的差额。
+    initialBalanceUntrusted: /^初始余额不可信（[^）]*）\| 读到=(-?\d+|null) \| 本轮不报差额 \| 账户=(\S+@\S+)/
 }
 
 function numericField(message, name) {
@@ -262,6 +266,18 @@ function applyLivePoints(state, entry) {
         const changed = acc.live.gained !== total || acc.live.balance !== balance
         acc.live.gained = total
         acc.live.balance = balance
+        if (changed) touch(acc)
+        return changed
+    }
+
+    // 只更新余额，不碰 live.gained：那一位代表"本轮赚了多少"，而这条行明确说
+    // "本轮不报差额"。余额是读数，差额是结论，两者不能混。
+    if (entry.title === 'FLOW' && (m = msg.match(RE.initialBalanceUntrusted))) {
+        const acc = target(m[2])
+        if (!acc) return false
+        const read = numOrNull(m[1])
+        const changed = acc.live.balance !== read
+        acc.live.balance = read
         if (changed) touch(acc)
         return changed
     }
