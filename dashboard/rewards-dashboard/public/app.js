@@ -209,6 +209,9 @@ async function refreshActive(force) {
     renderFooter();
   } catch (e) {
     console.error(`[${view.id}] refresh failed`, e);
+    // 以前这里只写 console。刷新失败时下面的 renderFooter() 被跳过，界面上原样留着
+    // 上一次的数字 —— 看起来和成功刷新一模一样，分不出它是旧的。把失败说出来。
+    U.toast(`${view.id} 刷新失败：${e.message}`, "error");
   }
 }
 
