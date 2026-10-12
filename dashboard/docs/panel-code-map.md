@@ -40,10 +40,23 @@
 
 **给设计者的三个要点：**
 
-1. **面板不是直连机器人的。** 中间永远隔着控制 API。前端只认识 `/api/*`。
+1. **前端只认识 `/api/*`，但面板后端不是只走控制 API。** 实时状态走 ②（控制 API 的
+   SSE）；**启动时它还会直接读 ① 的 `logs/*.log`**（`lib/logFileReplay.js`）。
+   原因是 ② 的日志缓冲区只有 2000 行，而一天的日志有 6000+ 行 —— 只靠 SSE 的话，
+   漏掉一条结束行，那个账号就永远停在「运行中」，**重启也救不回来**。详见第 3 节。
 2. **前端没有构建步骤。** `public/` 下的 `.js` 原样被浏览器加载（ESM `import`），
    改完刷新即生效，没有 webpack/vite。`sw.js` 是 service worker（有缓存，注意强刷）。
 3. **日志是唯一事实源。** 几乎所有数字最终都能追到 `logs/*.log` 的某一行。
+4. **一条日志要经过四个函数才变成面板里的数字**（顺序不能错）：
+
+   ```
+   EventHub  →  hub.on("entry")  →  entryToDockerLine(entry)  →  parseLine(line)  →  store.apply(event)
+   ```
+
+   `entryToDockerLine` 会给行首补一个合成时间戳（`parseLine` 要求行首有 Docker 风格的
+   时间戳）。**所以直接拿原始日志行喂 `parseLine` 会静默返回 `null`** ——
+   实测 14517 行解析出 0 条事件，不报错、不抛异常。这是本项目最容易踩的坑。
+   `store.apply` 的时间戳单调去重也会静默丢弃事件（补录时用 `{ backfill: true }` 绕过）。
 
 ---
 
@@ -104,10 +117,11 @@
 
 | 文件 | 职责 |
 |---|---|
-| `apiClient.js` | 控制 API 的 HTTP 客户端。面板 server 里所有 `client.get("/status")` 都走它 |
-| `parser.js` | **日志行解析**（把一行日志变成结构化字段；`REACT-PARSE`、`PUNCHCARD` 等 case 在这） |
-| `store.js` | `Store` 类，SQLite 读写与聚合（账号 / 运行 / 历史 / 事件）。面板的数据面 |
-| `eventHub.js` | SSE 扇出：把新事件推给所有打开的浏览器 |
+| `apiClient.js` | 控制 API 的 HTTP 客户端。面板 server 里所有 `client.get("/status")` 都走它。**还导出 `entryToDockerLine(entry)`** —— 实时链路的必需一环（见第 0 节要点 4） |
+| `parser.js` | **日志行解析**（把一行日志变成结构化字段；`REACT-PARSE`、`PUNCHCARD` 等 case 在这）。**数字字段一律同时接受 `null`**：上游在"基线未知"时会写 `null` 而不是数字，按 `\d+` 抓会整行匹配失败 |
+| `store.js` | `Store` 类，SQLite 读写与聚合（账号 / 运行 / 历史 / 事件）。面板的数据面。`apply(event, { backfill })`：补录允许比水位旧，但水位只升不降 |
+| `logFileReplay.js` | **启动时从 `logs/*.log` 按账号对账补录**（`resolveLogDir` / `replayLogFiles`）。**必须在 `EventHub` 连接之前跑完**，否则补录会被时间戳守卫挡住 |
+| `eventHub.js` | SSE 扇出：把新事件推给所有打开的浏览器。注意它的 `replay` 选项**只发给浏览器，不回写 SQLite** |
 | `scheduler.js` / `cron.js` | 调度与定时 |
 | `accounts.js` / `accountEnv.js` | 面板保存的账号 ↔ `.env` 变量的映射 |
 | `failureReasons.js` | 把 `last_error` 归成失败原因 |
@@ -158,23 +172,43 @@
 位置：`public/views/overview.js`
 
 ```js
-// L223  算出所有账号里的最大增益，作为条形图的统一标尺
+// 算出所有账号里的最大增益，作为条形图的统一标尺
 const globalMax = bucketed.length ? ... : 0;
-// L227  按账号 key 索引出「每天」的数组
+// 按账号 key 索引出「每天」的数组
 const daysByKey = Object.fromEntries(bucketed.map((b) => [b.key, b.days]));
 
-// L238  每个账号渲染一行
+// 每个账号渲染一行
 container.innerHTML = accounts.map((a) => {
     const days = daysByKey[a.key] || null;
 
-    // L253  ← 截图里那排小条形就是这一行
+    // 当天获得积分
+    const todayGained = days?.find((d) => d.dayKey === todayKey)?.gained ?? null;
+    // 总积分：跑的时候用实时余额，否则用上次结束时的余额
+    const shownPoints = isRunning ? (a.liveBalance ?? a.lastPoints) : a.lastPoints;
+
+    // 四个数字组成的统计带（前两个有值，后两个是空占位）
+    const statStrip = `<div class="hero-stat-strip">
+        <div class="hero-stat"><span class="hero-stat-num">${...}</span>
+                           <span class="hero-stat-label">Points</span></div>
+        <div class="hero-stat">… Today …</div>
+        <div class="hero-stat">… Tasks …</div>
+        <div class="hero-stat">… Done …</div>
+    </div>`;
+
+    // 累积条形图（截图里那排小条形）
     barCell = `<div class="accum-track"><div class="accum-bar">${buildAccumBarHtml(days, globalMax, isMobile ? 7 : null)}</div></div>`;
 
-    // L258  ← 当天获得积分【已经算好了】，只是现在没显示
-    const todayGained = days?.find((d) => d.dayKey === todayKey)?.gained ?? null;
+    // 左侧统计带 + 右侧条形图，同处一个 hero-row 网格里
+    // → <div class="hero-bar-cell">${statStrip}${barCell}</div>
     ...
 });
 ```
+
+> **注意：本节的源码行号是加统计带之前的，已经整体偏移。** 按函数名和 class 名搜，
+> 不要按行号跳。相关的 class：`.hero-row`（网格：左自适应 + 右 486px）、
+> `.hero-bar-cell`、`.hero-stat-strip` / `.hero-stat` / `.hero-stat-num` / `.hero-stat-label`，
+> 都在 `public/style.css`。**窄屏（≤768px）时只隐藏 `.hero-bar-cell .accum-track`，
+> 统计带要保留** —— 早先那条规则是整块 `display:none`，加统计带后会把它一起藏掉。
 
 `charts.js:300`：
 
@@ -193,14 +227,18 @@ cached("accounts", ctx.api.accounts, 5000),   // → /api/accounts
 
 ## 6. 要在「账户总览」里加字段，改哪几处
 
-你（用户）要的四个数字，现状：
+你（用户）要的四个数字，**现状（已按 2026-10-12 的改动更新）**：
 
-| 想要的 | 数据现在有没有 | 从哪来 |
+| 想要的 | 现状 | 从哪来 |
 |---|---|---|
-| **每日获得积分数** | **已经有** | `overview.js` L258 的 `todayGained`，来自 `/api/accounts` 的 `days[].gained` |
-| **总积分** | 有数据，但没进这一块 | 控制 API 的 `GET /points`；面板侧需要经 `server.js` 代理或由 `store` 落库 |
-| **总任务量** | **没有** | 日志 `[REACT-PARSE] 任务列表 \| 父任务=N \| 未完成=N`，需要新增解析 |
-| **已完成任务** | **没有** | 同上，`父任务 − 未完成` |
+| **总积分** | **已经显示** | `a.liveBalance ?? a.lastPoints`（跑的时候用实时余额，否则用上次结束时的余额） |
+| **每日获得积分数** | **已经显示** | `days[].gained`，当天那条（`todayGained`） |
+| **总任务量** | **仍然没有** | 日志 `[REACT-PARSE] 任务列表 \| 父任务=N \| 未完成=N`，**解析器还没有抽这两个数**，所以界面上显示「尚未采集」 |
+| **已完成任务** | **仍然没有** | 同上，`父任务 − 未完成` |
+
+**这四个数字现在渲染在每行左侧的一条统计带里**（`.hero-stat-strip`，四个 `.hero-stat`），
+右侧仍然是原来的累积条形图。**后两个是空占位**，`title` 提示 `Not collected yet` /
+中文「尚未采集」—— 设计者要做的正是把这两个补上（走下面第 6 节的五层）。
 
 ### 加一个字段的固定动作（五层，缺一层就不显示）
 
@@ -228,11 +266,11 @@ cached("accounts", ctx.api.accounts, 5000),   // → /api/accounts
 
 ## 7. 我没核实的地方（别当事实用）
 
-1. **面板的历史数据到底是自己解析日志，还是走控制 API 的 `/history`。**
-   两边都有证据：`server.js` 里有 `client.get("/history?limit=…")`，
-   同时面板又自带 `lib/parser.js`。**我的判断是**：历史走 `/history`，
-   `lib/parser.js` 用于实时流（`/api/events`），但**我没有逐行追完**。
-   设计前建议让工程师确认这一条。
+1. ~~**面板的历史数据到底是自己解析日志，还是走控制 API 的 `/history`。**~~
+   **已核实（2026-10-12）**：两条路都在，分工明确 ——
+   **实时**走 `EventHub` → `parseLine`（`lib/parser.js`）→ `store.apply`；
+   **历史聚合**走控制 API 的 `GET /history`。`lib/parser.js` 是实时链路的核心，
+   不是历史数据的来源。**但 `store` 里那些历史表具体由谁写满，我仍然没有逐行追完。**
 2. **`/api/summary` 与 `/api/accounts` 的完整字段形状。** 我只确认了
    `accounts[].key/email/status` 和 `days[].dayKey/gained`，没读完 `store.js` 的聚合。
 3. **`days[]` 的时间窗口与分桶规则**（几天？按哪个时区切天？）。
