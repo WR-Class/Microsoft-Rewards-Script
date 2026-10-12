@@ -211,8 +211,15 @@ function replayLogFiles({
         continue; // 单行解析失败不影响整体补录
       }
       if (!event || !event.email) continue;
-      if (event.kind !== "account-end" && event.kind !== "account-error") continue;
-      terminal++;
+      // 余额读数（account-balance-read）不是终态事件，但它是历史里唯一能补上"余额"的
+      // 来源 —— 上游在基线不可信时只给读数、不给差额，而 store 的历史行需要 points。
+      // 让它走同一套补录机器（同样受 hasHistory 幂等判据和 lastStartAt 时间护栏约束），
+      // 只是不计入"终态 N 条"的统计，也不参与"这个账号结束了吗"的判断。
+      const isBalanceRead = event.kind === "account-balance-read";
+      if (!isBalanceRead && event.kind !== "account-end" && event.kind !== "account-error") {
+        continue;
+      }
+      if (!isBalanceRead) terminal++;
 
       const prev = latest.get(event.email);
       if (!prev || Date.parse(event.ts) >= Date.parse(prev.ts)) {
