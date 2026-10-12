@@ -67,9 +67,12 @@ function buildRow({ config, local, histories, live = null }) {
     proxy: config ? config.proxy : null,
 
     // stats the API derives from its own in-memory run history
-    apiRuns: config ? (config.runs ?? 0) : 0,
-    apiTotalCollected: config ? (config.totalCollected ?? 0) : 0,
-    successStreak: config ? (config.successStreak ?? 0) : 0,
+    // 这三个数来自控制 API 的内存运行历史。config 缺失（账号不在 API 视野里）或字段缺失时，
+    // 它们是"不知道"，不是 0 —— 以前 `: 0` / `?? 0` 让界面把一个从未观察过的账号显示成
+    // "跑了 0 次、赚了 0 分、连续成功 0 次"，三个自信的 0。前端三处消费方已同时加 null 守卫。
+    apiRuns: config ? (config.runs ?? null) : null,
+    apiTotalCollected: config ? (config.totalCollected ?? null) : null,
+    successStreak: config ? (config.successStreak ?? null) : null,
     apiLastRunAt: config ? (config.lastRunAt ?? null) : null,
     apiLastCollected: config ? (config.lastCollected ?? null) : null,
     apiLastSuccess: config ? (config.lastSuccess ?? null) : null,

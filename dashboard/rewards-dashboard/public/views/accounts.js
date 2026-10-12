@@ -232,7 +232,7 @@ function detailGroups(a, protection) {
   groups.push([
     "Streak &amp; protection",
     [
-      ["Success streak", `${a.successStreak} run${a.successStreak === 1 ? "" : "s"}`],
+      ["Success streak", a.successStreak == null ? "\u2013" : `${a.successStreak} run${a.successStreak === 1 ? "" : "s"}`],
       ...(protection
         ? [
           [
@@ -259,7 +259,7 @@ function detailGroups(a, protection) {
   groups.push([
     "Run history",
     [
-      ["Runs recorded by the API", U.fmtNumber(a.apiRuns)],
+      ["Runs recorded by the API", a.apiRuns == null ? "\u2013" : U.fmtNumber(a.apiRuns)],
       ["Points collected (API history)", U.fmtSigned(a.apiTotalCollected)],
       ["Last duration", U.fmtDuration(a.lastDurationSec)],
       ["History points loaded", U.fmtNumber(a.historyCount)],
