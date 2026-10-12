@@ -332,8 +332,8 @@ function renderAccountRows(root) {
             <div class="hero-bar-cell">${statStrip}${barCell}</div>
             <div class="hero-acc-card">
                 <div class="hero-acc-pts">
-                    <span class="hero-pts-num">${shownPoints != null ? U.fmtNumber(shownPoints) : "\u2013"}</span>
-                    <span class="hero-pts-unit">Points</span>
+                    <span class="hero-pts-num">${days ? days.length : "\u2013"}</span>
+                    <span class="hero-pts-unit">Days run</span>
                 </div>
                 <div class="hero-acc-info">
                     <div class="hero-acc-name">

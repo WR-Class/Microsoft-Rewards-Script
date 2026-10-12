@@ -97,6 +97,7 @@ const EXACT = {
   Trend: "趋势",
   Summary: "摘要",
   Points: "积分",
+  "Days run": "运行天数",
   "Every recorded balance, oldest to newest": "每次记录的余额，由旧到新",
   "No accounts configured or observed yet.": "还没有配置或观察到账户。",
   "No history yet": "暂无历史",
