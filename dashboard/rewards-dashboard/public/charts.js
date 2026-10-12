@@ -185,10 +185,10 @@ export function buildHeatmapHtml(days) {
     ? activeGains.reduce((sum, g) => sum + g, 0) / activeGains.length
     : 1;
 
-  const today = new Date();
-  
-  // Safely format today as YYYY-MM-DD in local time
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  // "今天"必须和 byDay 的键用同一个时区：那些键是面板按 TZ（Asia/Shanghai）用
+  // tzDayKey 切出来的。以前这里用浏览器本地 getter，浏览器不在 UTC+8 时"今天"
+  // 高亮会落到相邻格子上。
+  const todayStr = U.tzDayKey(new Date());
 
   // 1. Anchor to the beginning (Left Justified)
   // We append T12:00:00 to avoid UTC timezone drift making the day shift to 'yesterday'
@@ -257,7 +257,7 @@ export function buildHeatmapHtml(days) {
       const d = new Date(start);
       d.setDate(start.getDate() + week * 7 + day);
 
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const key = U.tzDayKey(d); // 与 byDay 的键同源（面板 TZ），不能用浏览器本地日历
       const entry = byDay.get(key);
       const level = entry ? heatmapLevel(entry.gained, avgGained) : 0;
 
