@@ -255,6 +255,9 @@ class Store {
       ["streak_protection_remaining_days", "INTEGER"],
       ["streak_counter", "INTEGER"],
       ["streak_protection_updated_at", "TEXT"],
+      // 任务列表：父任务总数与已完成数（见 apply 的 case "task-list"）
+      ["total_tasks", "INTEGER"],
+      ["completed_tasks", "INTEGER"],
     ];
     for (const [name, type] of accountMigrations) {
       if (!accountCols.has(name))
@@ -324,6 +327,12 @@ class Store {
       deleteAccountActivity: this.db.prepare(
         "DELETE FROM activity WHERE email = ?",
       ),
+      // 按 user_name 关联，不是 email：任务列表那条行的账号段是**用户名**
+      // （qiaobaochong823680），消息体里没有邮箱。实测 10 个账号按 email 命中 0、
+      // 按 user_name 命中 1 —— 写成 WHERE email = ? 会一行都更新不到，而且不报错。
+      setAccountTasks: this.db.prepare(`
+                UPDATE accounts SET total_tasks = ?, completed_tasks = ? WHERE user_name = ?
+            `),
       allAccounts: this.db.prepare(`
                 SELECT email, user_name as userName, geo_locale as geoLocale, status,
                        last_start_at as lastStartAt, last_end_at as lastEndAt,
@@ -332,7 +341,8 @@ class Store {
                        streak_protection_enabled as streakProtectionEnabled,
                        streak_protection_remaining_days as streakProtectionRemainingDays,
                        streak_counter as streakCounter,
-                       streak_protection_updated_at as streakProtectionUpdatedAt
+                       streak_protection_updated_at as streakProtectionUpdatedAt,
+                       total_tasks as totalTasks, completed_tasks as completedTasks
                 FROM accounts
                 ORDER BY COALESCE(last_end_at, last_start_at) DESC
             `),
@@ -918,6 +928,22 @@ class Store {
         }
         this._resetCompletionEvidence();
         this._pushActivity(event);
+        break;
+      }
+      case "task-list": {
+        // bot 每轮解析任务列表后发"任务列表 | 父任务=N | 未完成=M"（src/browser/
+        // ReactFunc.ts:788）。父任务是总数，完成数 = 总数 - 未完成。面板 overview.js
+        // 的"总任务/已完成"两格读的就是这两个字段。
+        // 按 user_name 关联 —— 这条行的账号段是用户名而不是邮箱（见 setAccountTasks）。
+        // 不写 activity：它每轮都重发，进活动表只会挤掉真正需要留的行。
+        if (event.userName && event.total != null) {
+          this.stmts.setAccountTasks.run(
+            event.total,
+            event.completed,
+            event.userName,
+          );
+          changed = true;
+        }
         break;
       }
       case "login-number": {
