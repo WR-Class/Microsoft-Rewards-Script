@@ -2,10 +2,10 @@
 
 # 微软奖励脚本（V4-china）
 
-[![Version](https://img.shields.io/badge/version-4.3.0-blue.svg)](./package.json)
+[![Version](https://img.shields.io/badge/version-4.3.2.4-blue.svg)](./package.json)
 [![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D24-green.svg)](./package.json)
-[![Last Sync](https://img.shields.io/badge/最后同步-2026--08--16-orange.svg)](#-同步与致谢)
+[![Last Sync](https://img.shields.io/badge/最后同步-2026--09--29-orange.svg)](#-同步与致谢)
 [![Upstream](https://img.shields.io/badge/上游-TheNetsky/Microsoft--Rewards--Script-informational.svg)](https://github.com/TheNetsky/Microsoft-Rewards-Script)
 
 **基于 TypeScript · Patchright(Playwright) 的新一代架构 · 微软奖励自动化脚本**
@@ -262,6 +262,21 @@ docker compose restart          # 重启（不重建）
 - 启动：进入 `dashboard/rewards-dashboard/`，按该目录的 `README.md` 配置 `.env` 后运行 `node server.js`（默认 `http://127.0.0.1:8890`）
 - 连接：面板用 `CONTROL_API_URL` 指向控制 API；若控制 API 设了 `API_TOKEN`，面板侧需把同一个值配到 `CONTROL_API_TOKEN`，否则面板会报令牌不匹配
 - 不入库：面板的 `.env`（含令牌）、运行数据 `data/`、本地测试脚本，均由其自带的 `.gitignore` 覆盖
+
+### 静默启动与桌面快捷方式
+
+`node server.js` 是前台进程，关掉终端面板就没了。Windows 上推荐用 `%LOCALAPPDATA%\RewardsPanel\start-all.ps1` 一次拉起两个进程（控制 API `:3010` + 面板 `:8890`），都用 `Start-Process -WindowStyle Hidden` 隐藏窗口：
+
+- 日志：`%LOCALAPPDATA%\RewardsPanel\` 下的 `panel.log`、`panel.log.err`、`api.log`、`api.log.err`
+- 桌面快捷方式 `奖励面板.lnk` 指向：
+  `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%LOCALAPPDATA%\RewardsPanel\start-all.ps1"`
+- 脚本是幂等的：端口已在监听就跳过，不会起第二份
+- 单独重启面板：结束 `node server.js` 进程后重新执行一次 `start-all.ps1`
+- ⚠️ `start-all.ps1` 从**非交互 shell** 里用 `& powershell -File` 直接调用会阻塞（实测：命令挂住，强行结束该进程时会把控制 API 一起带走）。脚本里要拉起服务请直接用 `Start-Process`，不要包一层
+
+### 面板是只读观察者
+
+面板不参与执行：它通过控制 API 的 SSE 读日志，写自己的 SQLite（`dashboard/rewards-dashboard/data/dashboard.sqlite`）。**重启面板不影响正在跑的机器人**，删掉它的数据库也只影响面板自己的展示 —— 日志才是事实来源，面板重启后会从日志补录。机器人进程由控制 API 监管，与面板无关。
 
 ---
 
@@ -605,6 +620,18 @@ gmya.net 免费档对连续请求有频率限制。解决方法：
 - **Win 环境**：复制或重命名 `config.example.json` 为 `config.json`（项目根目录）并自定义偏好；修改后运行 `npm run build` 重新构建。
 - **Docker 环境**：账号和行为配置通过 `.env` 和 `compose.yaml` 传入；`CONFIG_*` 每次启动都会覆盖 `./config/config.json`。
 - 之前的 `accounts.json` 和旧版 `config.json` 与本分支不兼容。
+
+---
+
+## 🔀 本分支相对上游改了什么
+
+上游 [TheNetsky/Microsoft-Rewards-Script](https://github.com/TheNetsky/Microsoft-Rewards-Script) 面向英文/国际环境。本分支（`V4-china`）的改动集中在五块：
+
+- **本地化**：日志中文化；中国热搜查询源（百度/头条/抖音/微博/知乎）；README 与面板均为中文
+- **国内可用性**：Docker 镜像加速；PushPlus / 微信 ClawBot / Server酱推送
+- **控制 API**（`scripts/api/`）：HTTP 启动/停止/重启、SSE 实时日志、实时积分与运行历史，可选开启（见上一节）
+- **Web 面板**（`dashboard/`）：来源 [mgrimace/rewards-dashboard](https://github.com/mgrimace/rewards-dashboard) 的分支，按原目录结构并入，未改写其代码
+- **反检测**：拟人化（humanize）行为、`browserChannel` 双模式（chromium 默认 / msedge 实验性）、桌面会话预热
 
 ---
 
