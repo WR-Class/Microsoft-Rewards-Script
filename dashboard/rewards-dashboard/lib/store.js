@@ -358,7 +358,7 @@ class Store {
                 ORDER BY ts DESC LIMIT 1
             `),
       sumHistorySince: this.db.prepare(`
-                SELECT COALESCE(SUM(gained), 0) as gained, COALESCE(SUM(points), 0) as points
+                SELECT SUM(gained) as gained, SUM(points) as points
                 FROM account_history WHERE ts >= ?
             `),
 
@@ -487,9 +487,13 @@ class Store {
 
     const totals = this.stmts.sumHistorySince.get(running.startTs);
     const resolved = this.stmts.accountsResolvedSince.get(running.startTs);
-    const gained = totals.gained || 0;
-    const newTotal = totals.points || 0;
-    const oldTotal = newTotal - gained;
+    // 全部行 gained 为 null（基线未知）时 SUM 就是 NULL —— 那是"不知道"，不是 0。
+    // 以前 COALESCE(...,0) 加上这里的 `|| 0`，把整轮结账成"恰好赚了 0"，
+    // 还反推出 old_total = new_total，凭空造出一个基线。runs 表这三列本来就允许
+    // null（见 store.js 的 CREATE TABLE runs），所以"未知"可以如实存下去。
+    const gained = totals.gained;
+    const newTotal = totals.points;
+    const oldTotal = newTotal != null && gained != null ? newTotal - gained : null;
     const runtimeMin = Number(
       ((Date.parse(endTs) - Date.parse(running.startTs)) / 60000).toFixed(1),
     );
@@ -946,9 +950,13 @@ class Store {
     this._pendingDelay = null;
     const totals = this.stmts.sumHistorySince.get(running.startTs);
     const resolved = this.stmts.accountsResolvedSince.get(running.startTs);
-    const gained = totals.gained || 0;
-    const newTotal = totals.points || 0;
-    const oldTotal = newTotal - gained;
+    // 全部行 gained 为 null（基线未知）时 SUM 就是 NULL —— 那是"不知道"，不是 0。
+    // 以前 COALESCE(...,0) 加上这里的 `|| 0`，把整轮结账成"恰好赚了 0"，
+    // 还反推出 old_total = new_total，凭空造出一个基线。runs 表这三列本来就允许
+    // null（见 store.js 的 CREATE TABLE runs），所以"未知"可以如实存下去。
+    const gained = totals.gained;
+    const newTotal = totals.points;
+    const oldTotal = newTotal != null && gained != null ? newTotal - gained : null;
     const runtimeMin = Number(
       ((Date.parse(endTs) - Date.parse(running.startTs)) / 60000).toFixed(1),
     );
