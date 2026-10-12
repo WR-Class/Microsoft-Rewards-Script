@@ -110,8 +110,8 @@ const RE = {
     streakProtection:
         /^快照完成 \| offers=(\d+) \| 可上报=(\d+) \| streaks=(\d+) \| 连续保护已启用=(true|false|null) \| 连续保护剩余天数=(\d+|null) \| 连续计数=(\d+|null) \| 等级=([^|]+) \| 账户=(\S+@\S+)$/,
     accountEnd:
-        /^账户完成: (\S+) \| 获得积分=(-?\d+) \| 原余额=(\d+) \| 现余额=(\d+) \| 持续秒数=([\d.]+)/,
-    runEnd: /^全部账户完成 \| 处理账户数=(\d+) \| 获得积分=(-?\d+) \| 原余额=(\d+) \| 现余额=(\d+) \| 运行分钟数=([\d.]+)/,
+        /^账户完成: (\S+) \| 获得积分=(-?\d+|null) \| 原余额=(-?\d+|null) \| 现余额=(-?\d+|null) \| 持续秒数=([\d.]+|null)/,
+    runEnd: /^全部账户完成 \| 处理账户数=(\d+) \| 获得积分=(-?\d+|null) \| 原余额=(-?\d+|null)(?:（[^）]*）)? \| 现余额=(-?\d+|null)(?:（[^）]*）)? \| 运行分钟数=([\d.]+)/,
     accountError: /^(\S+@\S+) \| 错误=([\s\S]+)$/,
     flowFailed: /(\S+@\S+) 的.*流程失败:/i,
     accountDelay: /^等待 ([\d.]+) 秒后开始下一个账户(?: \((\S+@\S+)\))?$/,
@@ -121,12 +121,26 @@ const RE = {
     // the English names (pointsGained/currentBalance), so numericField() below never read them.
     searchProgress: /^获得积分=(-?\d+) \| 当前余额=(\d+)/,
     searchFinished: /^必应搜索完成 \| 获得积分=(-?\d+) \| 当前余额=(\d+)/,
-    flowCollected: /^积分已收集 \| 获得积分=(-?\d+) \| 现余额=(\d+) \| 账户=(\S+@\S+)/
+    // 两个形态都要认：`积分已收集（基线未知，不报差额） | 现余额=500 | 账户=x`（没有
+    // 获得积分）和 `积分已收集 | 获得积分=315 | 现余额=315 | 账户=x`。
+    // 可选部分一律用非捕获组 (?:…)：捕获组下标一变，下面 m[1]/m[2]/m[3] 就会静默取错字段。
+    flowCollected: /^积分已收集(?:（[^）]*）)? \| (?:获得积分=(-?\d+|null) \| )?现余额=(-?\d+|null) \| 账户=(\S+@\S+)/
 }
 
 function numericField(message, name) {
     const match = message.match(new RegExp(`(?:^| \\| )${name}=(-?\\d+(?:\\.\\d+)?)(?= \\| |$)`))
     return match ? Number(match[1]) : null
+}
+
+// 上游在"基线未知"时会把余额写成字面量 null（原余额=null | 现余额=null），
+// runEnd 还会在后面加一句"（另有 N 个账号基线未知，未计入）"。Number("null") 是 NaN，
+// 所以取数一律走这里：null / 空 / 非数字都得到 null（"不知道"），而不是 0。
+// 这正是面板顶部数字偏低约 7 倍的根因 —— 三个整行锚定的正则匹配不上带 null 的行，
+// 于是那些完成事件根本不被识别，界面把"读不到余额"显示成"赚了 0"。
+function numOrNull(v) {
+    if (v == null || v === 'null' || v === '') return null
+    const n = Number(v)
+    return Number.isNaN(n) ? null : n
 }
 
 function fractionField(message, name) {
@@ -243,8 +257,8 @@ function applyLivePoints(state, entry) {
     if (entry.title === 'FLOW' && (m = msg.match(RE.flowCollected))) {
         const acc = target(m[3])
         if (!acc) return false
-        const total = Number(m[1])
-        const balance = Number(m[2])
+        const total = numOrNull(m[1])
+        const balance = numOrNull(m[2])
         const changed = acc.live.gained !== total || acc.live.balance !== balance
         acc.live.gained = total
         acc.live.balance = balance
@@ -491,13 +505,13 @@ export function applyLogToRunState(state, entry) {
             if ((m = msg.match(RE.accountEnd))) {
                 const acc = ensureAccount(state, m[1])
                 if (acc) {
-                    acc.collectedPoints = Number(m[2])
-                    acc.initialPoints = Number(m[3])
-                    acc.finalPoints = Number(m[4])
-                    acc.durationSeconds = Number(m[5])
+                    acc.collectedPoints = numOrNull(m[2])
+                    acc.initialPoints = numOrNull(m[3])
+                    acc.finalPoints = numOrNull(m[4])
+                    acc.durationSeconds = numOrNull(m[5])
                     acc.success = true
-                    acc.live.gained = Number(m[2])
-                    acc.live.balance = Number(m[4])
+                    acc.live.gained = numOrNull(m[2])
+                    acc.live.balance = numOrNull(m[4])
                     const at = eventTime(entry)
                     acc.live.lastUpdateTs = at
                     state.lastPointUpdateAt = at
@@ -520,11 +534,11 @@ export function applyLogToRunState(state, entry) {
         case 'RUN-END':
             if ((m = msg.match(RE.runEnd))) {
                 state.totals = {
-                    accountsProcessed: Number(m[1]),
-                    collected: Number(m[2]),
-                    oldTotal: Number(m[3]),
-                    newTotal: Number(m[4]),
-                    runtimeMinutes: Number(m[5])
+                    accountsProcessed: numOrNull(m[1]),
+                    collected: numOrNull(m[2]),
+                    oldTotal: numOrNull(m[3]),
+                    newTotal: numOrNull(m[4]),
+                    runtimeMinutes: numOrNull(m[5])
                 }
                 state.finished = true
                 state.pendingDelay = null
