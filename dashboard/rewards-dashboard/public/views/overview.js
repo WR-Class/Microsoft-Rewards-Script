@@ -303,8 +303,33 @@ function renderAccountRows(root) {
               dur ? ` \u00b7 <span title="Last run duration">⏱ ${U.escapeHtml(dur)}</span>` : ""
             }${gainHtml}`;
 
+      // 这一行左侧原本只放一个小条形图，占着 1fr 的全宽却大片留白。
+      // 把四个数字放进同一个格子：总积分 / 今日获得 / 总任务 / 已完成。
+      // 前两个数据本来就在 payload 里（shownPoints 见 L293，todayGained 见 L258）；
+      // 后两个还没有来源 —— 日志里是 [REACT-PARSE] 任务列表 | 父任务=N | 未完成=N，
+      // 但面板的 lib/parser.js 目前只分类不抽数，所以先留占位，等解析层补上就自动显示。
+      const tasksTitle = "Not collected yet";
+      const statStrip = `<div class="hero-stat-strip">
+            <div class="hero-stat">
+                <span class="hero-stat-num">${shownPoints != null ? U.fmtNumber(shownPoints) : "\u2013"}</span>
+                <span class="hero-stat-label">Points</span>
+            </div>
+            <div class="hero-stat">
+                <span class="hero-stat-num">${todayGained != null ? `+${U.fmtNumber(todayGained)}` : "\u2013"}</span>
+                <span class="hero-stat-label">Today</span>
+            </div>
+            <div class="hero-stat" title="${U.escapeAttr(tasksTitle)}">
+                <span class="hero-stat-num">${a.totalTasks != null ? U.fmtNumber(a.totalTasks) : "\u2013"}</span>
+                <span class="hero-stat-label">Tasks</span>
+            </div>
+            <div class="hero-stat" title="${U.escapeAttr(tasksTitle)}">
+                <span class="hero-stat-num">${a.completedTasks != null ? U.fmtNumber(a.completedTasks) : "\u2013"}</span>
+                <span class="hero-stat-label">Done</span>
+            </div>
+        </div>`;
+
       return `<div class="hero-row">
-            <div class="hero-bar-cell">${barCell}</div>
+            <div class="hero-bar-cell">${statStrip}${barCell}</div>
             <div class="hero-acc-card">
                 <div class="hero-acc-pts">
                     <span class="hero-pts-num">${shownPoints != null ? U.fmtNumber(shownPoints) : "\u2013"}</span>

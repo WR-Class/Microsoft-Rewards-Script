@@ -50,6 +50,8 @@ const EXACT = {
   Interrupted: "已中断",
   Crashed: "已崩溃",
   Done: "已完成",
+  Tasks: "任务",
+  "Not collected yet": "尚未采集",
   Success: "成功",
   Error: "错误",
   Pending: "等待中",

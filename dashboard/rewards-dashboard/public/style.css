@@ -1533,6 +1533,33 @@ tbody tr:hover {
   min-height: 38px;
 }
 
+/* 数字条：把这一行原本空着的大片宽度用起来。
+   四个数字横排，条形图留在下面 —— 窄屏时条形被隐藏，数字条保留。 */
+.hero-stat-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.5rem;
+  align-items: baseline;
+}
+.hero-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 3.25rem;
+}
+.hero-stat-num {
+  font-size: 1.05rem;
+  font-weight: 650;
+  color: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.hero-stat-label {
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
 .hero-acc-card {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -2550,7 +2577,13 @@ tbody tr:hover {
   .hero-row {
       grid-template-columns: 1fr;
     }
+  /* 窄屏藏的是"趋势条形"，不是整块数字区：数字比条形更该留下。
+     原先这里 display:none 会把新增的数字条一起藏掉。 */
   .hero-bar-cell {
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+    }
+  .hero-bar-cell .accum-track {
       display: none;
     }
   .hero-acc-pts {
