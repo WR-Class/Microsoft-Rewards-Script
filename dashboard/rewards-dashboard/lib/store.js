@@ -159,6 +159,27 @@ class Store {
         `);
       }
     }
+    // 同一 (email, ts) 存两遍：实时路径和启动补录会写同一个事件（补录走
+    // backfill:true，而那个标志的作用正是跳过时间戳守卫），于是两个写入方互不排斥。
+    // 实测 2026-10-12：2 个账号完成，行数 +4。
+    // 去重必须排在建唯一索引**之前** —— 已有重复行时建唯一索引会直接失败。
+    // 保留 MIN(id)（先写进去的那条），并且只在索引还不存在时做一次。
+    {
+      const hasUnique = this.db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_history_email_ts_unique'",
+        )
+        .get();
+      if (!hasUnique) {
+        this.db.exec(`
+          DELETE FROM account_history
+            WHERE id NOT IN (SELECT MIN(id) FROM account_history GROUP BY email, ts);
+          DROP INDEX IF EXISTS idx_history_email_ts;
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_history_email_ts_unique
+            ON account_history(email, ts);
+        `);
+      }
+    }
     this._migrate();
     this._prepare();
     this._lastTs = this._readMeta("lastTs");
@@ -273,7 +294,7 @@ class Store {
                     streak_protection_updated_at = excluded.streak_protection_updated_at
             `),
       insertHistory: this.db.prepare(
-        "INSERT INTO account_history (email, ts, points, gained, duration_sec) VALUES (?, ?, ?, ?, ?)",
+        "INSERT OR IGNORE INTO account_history (email, ts, points, gained, duration_sec) VALUES (?, ?, ?, ?, ?)",
       ),
       historyForEmail: this.db.prepare(
         "SELECT ts, points, gained, duration_sec as durationSec FROM account_history WHERE email = ? ORDER BY ts ASC",
