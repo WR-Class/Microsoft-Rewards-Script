@@ -287,7 +287,10 @@ function replayLogFiles({
   let historyAdded = 0;
   if (typeof recordHistory === "function" && typeof hasHistory === "function") {
     for (const event of allTerminal) {
-      if (event.kind !== "account-end") continue; // account-error 不进历史表
+      // account-error 不进历史表；余额读数要进 —— 它存在的意义就是给历史补上余额
+      // （上游在基线不可信时只给读数、不给差额）。少了这一支，只有落进 latest 的
+      // 那几条读数会被第二遍写入，其余全丢：实测 33 条读数只补上 22 条。
+      if (event.kind !== "account-end" && event.kind !== "account-balance-read") continue;
       const key = `${event.email.trim().toLowerCase()}\u0000${event.ts}`;
       if (appliedKeys.has(key)) continue; // 刚被整条 apply 写过，别插第二遍
       if (hasHistory(event.email, event.ts)) continue; // 早就有了
