@@ -27,6 +27,18 @@ const numOrNull = (s) => (s === "null" ? null : Number(s));
 // 也就是说这一天所有跑完的账号都卡住了。
 const ACCOUNT_END_RE =
   /^(?:Completed account|账户完成):\s*(\S+)\s*\|\s*(?:pointsGained|获得积分)=(-?\d+|null)\s*\|\s*(?:previousBalance|原余额)=(\d+|null)\s*\|\s*(?:currentBalance|现余额)=(\d+|null)\s*\|\s*(?:durationSeconds|持续秒数)=([\d.]+)$/;
+
+// 上游在基线未知时**不再发 ACCOUNT-END**，改发一条 FLOW 级别的 WARN：
+//   积分已收集（基线未知，不报差额） | 现余额=500 | 账户=x@outlook.com
+// 账户在**最后**，且没有获得积分/原余额/持续秒数 —— 差额是"不知道"（null），
+// 余额是读到的真值。
+//
+// 实测 2026-10-12：这条行当天出现 26 次，一条都没被识别，于是 account-end
+// 事件数为 0，account_history 从 10-11 起再没写进新行，而 accounts 表靠清理
+// 路径照常更新 —— 面板于是显示"成功 + 今天没有运行"。所以这不是文案问题，
+// 是整个结束事件消失了。括号里的话用 [^）]* 放宽，别把措辞钉死。
+const FLOW_POINTS_COLLECTED_RE =
+  /^积分已收集（[^）]*）\s*\|\s*(?:currentBalance|现余额)=(-?\d+|null)\s*\|\s*(?:account|账户)=(\S+)$/;
 // English "email: message"; the fork logs "email | 错误=message".
 const ACCOUNT_ERR_RE = /^(\S+@\S+)(?::\s*|\s*\|\s*错误=)([\s\S]*)$/;
 
@@ -182,6 +194,23 @@ function parseLine(rawLine) {
           oldPoints: numOrNull(am[3]),
           newPoints: numOrNull(am[4]),
           durationSec: Number(am[5]),
+        };
+      }
+      break;
+    }
+    case "FLOW": {
+      // FLOW 是通用标题（今天 665 条），只在这里"试着"认出一种；认不出就 break，
+      // 照旧走后面的 generic 处理，不能因为加了这一支就把别的 FLOW 行吃掉。
+      const fm = FLOW_POINTS_COLLECTED_RE.exec(message);
+      if (fm) {
+        return {
+          ...base,
+          kind: "account-end",
+          email: fm[2],
+          gained: null, // 基线未知 = 差额不知道，不是 0
+          oldPoints: null,
+          newPoints: numOrNull(fm[1]),
+          durationSec: null, // 这一行不带持续秒数
         };
       }
       break;
