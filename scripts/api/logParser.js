@@ -88,7 +88,7 @@ function ensureAccount(state, email) {
             error: null,
             live: {
                 balance: null, // latest known available-points balance
-                gained: 0, // points earned so far this run (per this account)
+                gained: null, // 本轮该账号已赚；null = 还没读到，不是"赚了 0"
                 bySource: {}, // keyed by normalized activity source
                 lastUpdateTs: null
             }
@@ -549,9 +549,14 @@ export function applyLogToRunState(state, entry) {
 
         case 'RUN-END':
             if ((m = msg.match(RE.runEnd))) {
+                // 「（另有 N 个账号基线未知，未计入）」说明这一行报的是部分和，不是本轮真实
+                // 总量。以前注解被解析后丢掉，界面就把部分和当总量显示。用独立正则取 N，
+                // 不往上面的正则里加捕获组 —— 加组会让 m[3]/m[4]/m[5] 整体平移，消费方静默取错字段。
+                const excluded = /（另有 (\d+) 个账号基线未知，未计入）/.exec(msg)
+                const partial = !!(excluded && Number(excluded[1]) > 0)
                 state.totals = {
                     accountsProcessed: numOrNull(m[1]),
-                    collected: numOrNull(m[2]),
+                    collected: partial ? null : numOrNull(m[2]),
                     oldTotal: numOrNull(m[3]),
                     newTotal: numOrNull(m[4]),
                     runtimeMinutes: numOrNull(m[5])
@@ -571,12 +576,20 @@ export function applyLogToRunState(state, entry) {
 
 function accountCollected(a) {
     if (typeof a.collectedPoints === 'number') return a.collectedPoints
-    return a.live?.gained ?? 0
+    // null 表示"还没读到"，不是 0。以前这里 `?? 0` 把"没读到"当成"没赚到"，
+    // 于是只收到「初始余额不可信」的账号会在界面上显示 "+0 pts"。
+    return a.live?.gained ?? null
 }
 
 export function summarizeRunState(state) {
     const accounts = state.order.map(email => state.accounts[email])
-    const collected = state.totals?.collected ?? accounts.reduce((sum, a) => sum + accountCollected(a), 0)
+    // 只有每个账号都有确定值时，才给出"本轮总计"。否则那是部分和 —— 实测 10 个账号里
+    // 3 个有值、7 个未知时，界面出现过一个把未知当成 0 的 187（当天真实移动量 1385）。
+    // 宁可报"不知道"，也不给一个偏低的数当总量。
+    const each = accounts.map(accountCollected)
+    const collected =
+        state.totals?.collected ??
+        (each.every(v => typeof v === 'number') ? each.reduce((sum, v) => sum + v, 0) : null)
 
     const current = state.currentEmail ? state.accounts[state.currentEmail] : null
     return {
