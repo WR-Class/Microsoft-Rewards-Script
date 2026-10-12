@@ -8,6 +8,12 @@ const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "..", "data");
 const DB_FILE = path.join(DATA_DIR, "dashboard.sqlite");
 
 const MAX_ACTIVITY_ROWS = 5000;
+// 未识别原始行（kind = 'generic'）单独限量。它们占这张表的大头（实测 1751/2023 = 87%），
+// 而运行结算要读的是 account-start/end/error、login-number* 这些。两者共用一个上限的结果是：
+// 噪音把预算吃光后，本轮运行自己的结算行会被它后面的插入挤掉，表现为"已完成 N/10"偏低、
+// pendingApproval 悄悄翻 false —— 不报错，只是数字变小。分开限量后结算行独占
+// MAX_ACTIVITY_ROWS（实际不到 200 行），不可能触顶；活动流仍能看到 generic 行。
+const MAX_GENERIC_ROWS = 500;
 
 // Last-resort cutoff for a 'running' row whose account roster never filled
 // (see the run-start case in apply() below) - e.g. the process died after
@@ -425,7 +431,18 @@ class Store {
                 SELECT ts, level, title, kind, user_name as userName, platform, email, message, raw
                 FROM activity ORDER BY id DESC LIMIT ?
             `),
-      countActivity: this.db.prepare("SELECT COUNT(*) as n FROM activity"),
+      // 只数"结算行"（运行结算要读的那些）；噪音行单独计数、单独限量。
+      countActivity: this.db.prepare(
+        "SELECT COUNT(*) as n FROM activity WHERE kind IS NOT 'generic'",
+      ),
+      countGenericActivity: this.db.prepare(
+        "SELECT COUNT(*) as n FROM activity WHERE kind = 'generic'",
+      ),
+      pruneGenericActivity: this.db.prepare(`
+                DELETE FROM activity WHERE id IN (
+                    SELECT id FROM activity WHERE kind = 'generic' ORDER BY id ASC LIMIT ?
+                )
+            `),
       pruneActivity: this.db.prepare(`
                 DELETE FROM activity WHERE id IN (
                     SELECT id FROM activity ORDER BY id ASC LIMIT ?
@@ -587,9 +604,15 @@ class Store {
       event.message || null,
       event.raw || null,
     );
+    // 结算行与噪音行各查各的、各删各的：一个全局上限会让 generic 噪音把预算吃光，
+    // 从而删掉本轮运行自己写入的结算行（见 MAX_GENERIC_ROWS 处的说明）。
     const { n } = this.stmts.countActivity.get();
     if (n > MAX_ACTIVITY_ROWS) {
       this.stmts.pruneActivity.run(n - MAX_ACTIVITY_ROWS);
+    }
+    const g = this.stmts.countGenericActivity.get();
+    if (g > MAX_GENERIC_ROWS) {
+      this.stmts.pruneGenericActivity.run(g - MAX_GENERIC_ROWS);
     }
   }
 
