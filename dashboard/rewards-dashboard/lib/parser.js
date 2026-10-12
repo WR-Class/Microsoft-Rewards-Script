@@ -37,6 +37,12 @@ const ACCOUNT_END_RE =
 // 事件数为 0，account_history 从 10-11 起再没写进新行，而 accounts 表靠清理
 // 路径照常更新 —— 面板于是显示"成功 + 今天没有运行"。所以这不是文案问题，
 // 是整个结束事件消失了。括号里的话用 [^）]* 放宽，别把措辞钉死。
+// bot: src/browser/ReactFunc.ts:788 —— 每次解析任务列表后发一条
+//   任务列表 | 父任务=42 | 未完成=7
+// 父任务是总数，完成数 = 父任务 - 未完成。面板 overview.js 早就在渲染
+// a.totalTasks / a.completedTasks（空值显示 –），但从来没有人赋值 —— 这两个数
+// 一直是空的。这条规则就是补上那一端。
+const TASK_LIST_RE = /^任务列表\s*\|\s*父任务=(\d+)\s*\|\s*未完成=(\d+)\s*$/;
 const FLOW_POINTS_COLLECTED_RE =
   /^积分已收集（[^）]*）\s*\|\s*(?:currentBalance|现余额)=(-?\d+|null)\s*\|\s*(?:account|账户)=(\S+)$/;
 // English "email: message"; the fork logs "email | 错误=message".
@@ -307,6 +313,18 @@ function parseLine(rawLine) {
       break;
     }
     case "REACT-PARSE": {
+      const tasks = TASK_LIST_RE.exec(message);
+      if (tasks) {
+        const total = Number(tasks[1]);
+        const incomplete = Number(tasks[2]);
+        return {
+          ...base,
+          kind: "task-list",
+          total,
+          incomplete,
+          completed: total - incomplete,
+        };
+      }
       const protection = STREAK_PROTECTION_RE.exec(message);
       if (protection) {
         return {
