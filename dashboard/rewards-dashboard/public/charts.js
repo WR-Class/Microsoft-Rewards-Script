@@ -191,9 +191,19 @@ export function buildHeatmapHtml(days) {
   const todayStr = U.tzDayKey(new Date());
 
   // 1. Anchor to the beginning (Left Justified)
-  // We append T12:00:00 to avoid UTC timezone drift making the day shift to 'yesterday'
-  let start = new Date(days[0].dayKey + "T12:00:00");
-  start.setHours(12, 0, 0, 0);
+  // 整张网格都在"日期键"上走：key 直接来自 days 的键空间（与 byDay 同源），加减用纯 UTC，
+  // 不经过浏览器本地日历。以前是 new Date(dayKey + "T12:00:00") + setDate/getDay/getMonth ——
+  // 起点是**浏览器本地**的，浏览器不在 +8 时本地正午 12:00 在面板 TZ 里已经是第二天，
+  // 整张网格偏一格；而且月份标签走浏览器本地、格子走面板 TZ，同一个网格里两个时区，
+  // 月份标题会和它下面的格子对不上。
+  const keyAddDays = (key, n) => {
+    const d = new Date(key + "T00:00:00Z");
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  };
+  const keyDayOfWeek = (key) => new Date(key + "T00:00:00Z").getUTCDay(); // 0=周日 .. 6=周六
+
+  let startKey = days[0].dayKey;
 
   // Never let the window stretch back further than needed to still leave
   // HEATMAP_FUTURE_BUFFER_WEEKS of "coming up" room ahead of today - without
@@ -201,16 +211,15 @@ export function buildHeatmapHtml(days) {
   // once it passes a year old it stops leaving any future runway at all
   // (right back to the original "today pinned at the far edge" problem,
   // just deferred).
-  const earliestAllowed = new Date(today);
-  earliestAllowed.setDate(
-    earliestAllowed.getDate() -
-    (HEATMAP_MIN_WEEKS - HEATMAP_FUTURE_BUFFER_WEEKS) * 7,
+  const earliestKey = keyAddDays(
+    todayStr,
+    -(HEATMAP_MIN_WEEKS - HEATMAP_FUTURE_BUFFER_WEEKS) * 7,
   );
-  if (start < earliestAllowed) start = earliestAllowed;
+  if (startKey < earliestKey) startKey = earliestKey;
 
   // Align to Monday so weeks stay vertical
-  while (start.getDay() !== 1) {
-    start.setDate(start.getDate() - 1);
+  while (keyDayOfWeek(startKey) !== 1) {
+    startKey = keyAddDays(startKey, -1);
   }
 
   // The clamp above guarantees the window is always bounded, so the grid is
@@ -230,10 +239,9 @@ export function buildHeatmapHtml(days) {
     gridHtml += '<div class="heatmap-week">';
     
     // Evaluate month mappings natively to flex rows above the cell block wrapper
-    const weekStartDay = new Date(start);
-    weekStartDay.setDate(start.getDate() + week * 7);
-    const weekMonth = weekStartDay.getMonth();
-    const weekKey = `${weekStartDay.getFullYear()}-${String(weekMonth + 1).padStart(2, '0')}-01`;
+    const weekStartKey = keyAddDays(startKey, week * 7);
+    const weekMonth = Number(weekStartKey.slice(5, 7)) - 1; // 0-11，与下面 lastMonth 的比较口径一致
+    const weekKey = `${weekStartKey.slice(0, 7)}-01`;
 
     if (lastMonth === -1) {
         lastMonth = weekMonth;
@@ -254,10 +262,8 @@ export function buildHeatmapHtml(days) {
     }
 
     for (let day = 0; day < 7; day++) {
-      const d = new Date(start);
-      d.setDate(start.getDate() + week * 7 + day);
-
-      const key = U.tzDayKey(d); // 与 byDay 的键同源（面板 TZ），不能用浏览器本地日历
+      // 键直接由 startKey 递推 —— 不再经过浏览器本地日历，所以没有偏一格的可能
+      const key = keyAddDays(weekStartKey, day);
       const entry = byDay.get(key);
       const level = entry ? heatmapLevel(entry.gained, avgGained) : 0;
 
