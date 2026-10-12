@@ -67,10 +67,20 @@ const LOG_DIR = resolveLogDir({
   panelDir: __dirname,
   override: process.env.LOG_DIR || "",
 });
+// 判据用"这条结束在历史里到底有没有"，而不是账号状态 —— 状态会被 store 的清理
+// 路径提前改成 success，那恰恰是"还没补过"的信号，不是"不需要补"的信号。
+// 用不带过滤的 allHistories（不是 allHistoriesSince，那个要 since 参数），
+// 索引在补录之前建一次就够：latest 每个账号只留一条终态，同一次启动不会重复应用。
+const historyKeys = new Set();
+for (const r of store.stmts.allHistories.all()) {
+  historyKeys.add(`${String(r.email).trim().toLowerCase()}\u0000${r.ts}`);
+}
 const backfill = replayLogFiles({
   dir: LOG_DIR,
   rows: store.snapshotAccounts(),
   apply: (event, opts) => store.apply(event, opts),
+  hasHistory: (email, ts) =>
+    historyKeys.has(`${String(email).trim().toLowerCase()}\u0000${ts}`),
   log,
 });
 log(

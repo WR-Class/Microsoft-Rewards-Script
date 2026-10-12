@@ -153,6 +153,7 @@ function replayLogFiles({
   maxLines = DEFAULT_MAX_LINES,
   rows = [],
   apply,
+  hasHistory = null,
   log = () => {},
 }) {
   const files = listRecentLogFiles(dir, days);
@@ -230,7 +231,20 @@ function replayLogFiles({
       unmatched++; // store 里没有这个账号，交给实时路径处理
       continue;
     }
-    if (row.status !== "running") continue; // 已经有终态，不需要补
+    // **判据不是 status，也不是 lastEndAt。** 这两个都会被 store 的清理路径污染：
+    // 一轮被中断时 markAccountCompletedWithoutResult 会把还卡在 running 的账号直接
+    // 标成 success，并把 last_end_at 写成这次的时间 —— 而**不写 account_history**。
+    // 于是"状态已经是 success"和"last_end_at 很新"都恰恰是"这条结束行还没被应用"的
+    // 信号，而不是"不需要补"的信号。实测 2026-10-12：两种判据各让补录应用 0 条。
+    //
+    // 该问的是：这条结束在历史里到底有没有？有就跳过，没有就补。这样天然幂等，
+    // 也不依赖任何会被别处改写的字段。hasHistory 由调用方用 store 的历史表建索引；
+    // 没传就退回旧的 status 判据（宁可少补，也不要重复插）。
+    if (typeof hasHistory === "function") {
+      if (hasHistory(email, event.ts)) continue;
+    } else if (row.status !== "running") {
+      continue;
+    }
     // 终态事件必须发生在这行记录的这次开始之后，否则是更早一轮的历史，
     // 补进去会把当前状态往回退。
     if (row.lastStartAt && Date.parse(event.ts) < Date.parse(row.lastStartAt)) {

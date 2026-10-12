@@ -80,8 +80,8 @@ CREATE TABLE IF NOT EXISTS account_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     email TEXT NOT NULL,
     ts TEXT NOT NULL,
-    points INTEGER NOT NULL,
-    gained INTEGER NOT NULL,
+    points INTEGER,
+    gained INTEGER,
     duration_sec REAL
 ) STRICT;
 CREATE INDEX IF NOT EXISTS idx_history_email_ts ON account_history(email, ts);
@@ -126,6 +126,39 @@ class Store {
     this.db.exec("PRAGMA journal_mode = WAL;");
     this.db.exec("PRAGMA synchronous = NORMAL;");
     this.db.exec(SCHEMA);
+    // account_history 的 gained/points 原本是 NOT NULL，而"基线未知"的结束事件差额
+    // 就是 null —— 插入直接抛 NOT NULL constraint failed，整条事件被丢掉。实测
+    // 2026-10-12：上游改发 [FLOW] 积分已收集（基线未知，不报差额）之后，account_history
+    // 自 10-11 起再没写进新行，而 accounts 表靠清理路径照常更新 —— 面板的症状就只是
+    // "成功 + 今天没有运行"，一点数据库错误都看不到。null 在这里是**有意义的**
+    // （不知道 ≠ 0），所以约束本身是错的。STRICT 表不能原地去掉 NOT NULL，只能重建；
+    // 行是复制过去的，不丢数据。只在确实还是 NOT NULL 时做，之后是空操作。
+    {
+      const cols = this.db.prepare("PRAGMA table_info(account_history)").all();
+      const isNotNull = (name) => {
+        const c = cols.find((x) => x.name === name);
+        return Boolean(c && c.notnull);
+      };
+      if (isNotNull("gained") || isNotNull("points")) {
+        this.db.exec(`
+          BEGIN;
+          CREATE TABLE account_history_migrated (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT NOT NULL,
+            ts TEXT NOT NULL,
+            points INTEGER,
+            gained INTEGER,
+            duration_sec REAL
+          ) STRICT;
+          INSERT INTO account_history_migrated (id, email, ts, points, gained, duration_sec)
+            SELECT id, email, ts, points, gained, duration_sec FROM account_history;
+          DROP TABLE account_history;
+          ALTER TABLE account_history_migrated RENAME TO account_history;
+          CREATE INDEX IF NOT EXISTS idx_history_email_ts ON account_history(email, ts);
+          COMMIT;
+        `);
+      }
+    }
     this._migrate();
     this._prepare();
     this._lastTs = this._readMeta("lastTs");
