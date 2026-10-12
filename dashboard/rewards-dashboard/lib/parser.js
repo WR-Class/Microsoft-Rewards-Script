@@ -212,6 +212,11 @@ function parseLine(rawLine) {
       if (fm) {
         return {
           ...base,
+          // title 必须跟着一起改写。store 的 accountsResolvedSince 按
+          // title IN ('ACCOUNT-END','ACCOUNT-ERROR') 计数，沿用 FLOW 的话这些完成行
+          // 对运行结算完全不可见（DB 里已有 4 行 title=FLOW kind=account-end）。
+          // 该计数是 COUNT(DISTINCT email)，所以与配对的那条 ACCOUNT-END 行不会重复计。
+          title: "ACCOUNT-END",
           kind: "account-end",
           email: fm[2],
           gained: null, // 基线未知 = 差额不知道，不是 0
