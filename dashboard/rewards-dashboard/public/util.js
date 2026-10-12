@@ -103,10 +103,14 @@ export function setTimeZone(tz) {
   timeZone = tz || null;
 }
 
-// 后端没给时区时退到**本机/系统**时区，绝不退到 UTC：
+// 后端没给时区时退到**本机/系统**时区，不退到 UTC：
 // 用 UTC 算"今天"，在本地 00:00 到 08:00 之间会得到昨天，看板上就是日期差一天。
+//
+// 这里曾经写成 `... || "UTC"` —— 那一段是不可达的（resolvedOptions().timeZone 在任何
+// 浏览器里都返回字符串），而且和上面这句注释自相矛盾：代码确实会退到 UTC，注释说不会。
+// 去掉后若真拿到 undefined，Intl 按规范用系统时区，行为与原来完全一致。
 function activeTimeZone() {
-  return timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  return timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
 
 export function tzDateParts(instant) {
