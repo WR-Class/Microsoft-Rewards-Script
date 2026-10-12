@@ -82,7 +82,11 @@ const EXACT = {
   // --- overview ------------------------------------------------------------
   "Accounts Overview": "账户总览",
   "Accounts tracked": "已跟踪账户",
-  "Accounts in error": "出错的账户",
+  // 统计卡数的是"此刻处于错误状态"（overview.js 的 errorCount 用 status === "error"）；
+  // 失败原因那栏数的是"最近失败过"（lastError 非空，副标题已写"按最近一次结果"）。
+  // 两个数本来就会在"上一轮失败、此刻正在重跑"这类账号上分开 —— 标签各自说清口径，
+  // 而不是把口径统一掉（统一任一侧都是丢信息）。
+  "Accounts in error now": "当前出错的账户",
   "Combined balance": "合计余额",
   "Change in points since last check-in from all sources":
     "自上次检查以来各来源的积分变化",

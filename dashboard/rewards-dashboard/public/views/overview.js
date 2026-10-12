@@ -146,7 +146,7 @@ function renderStats(root, status) {
       "statErrors",
       U.fmtNumber(errorCount),
       "errors",
-      "Accounts in error",
+      "Accounts in error now",
       errorCount > 0 ? "stat-icon-alert icon-alert-active" : "stat-icon-check",
       errorCount > 0 ? "!" : "\u2713",
     ),
