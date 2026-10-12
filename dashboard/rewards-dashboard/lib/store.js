@@ -610,7 +610,7 @@ class Store {
     if (n > MAX_ACTIVITY_ROWS) {
       this.stmts.pruneActivity.run(n - MAX_ACTIVITY_ROWS);
     }
-    const g = this.stmts.countGenericActivity.get();
+    const { n: g } = this.stmts.countGenericActivity.get();
     if (g > MAX_GENERIC_ROWS) {
       this.stmts.pruneGenericActivity.run(g - MAX_GENERIC_ROWS);
     }
