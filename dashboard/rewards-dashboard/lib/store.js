@@ -905,6 +905,18 @@ class Store {
         });
         break;
       }
+      case "login-number-resolved": {
+        // 只写一条 activity 行：这是"这次登录确认已经被处理掉"的记号。
+        // 缺了它，lastLoginPromptKindSince 只看得见请求、看不见解决，于是一个用户
+        // 早已输完码、机器人也继续跑了的账号，会一直显示成"等待选择登录数字"。
+        // （实时界面不走这里 —— server.js 另有一支直接清 pendingLoginCodes。）
+        this._pushActivity({
+          ...event,
+          level: "info",
+          message: `Login approval resolved for ${event.userName}`,
+        });
+        break;
+      }
       case "account-balance-read": {
         // 上游标注"初始余额不可信"时给出的那个读数。它不是一次完成：只写一条余额快照
         // （points=N、gained=null），不碰 status、不调 _scheduleAutoCloseCheck ——
