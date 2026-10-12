@@ -32,7 +32,10 @@ const DASHBOARD_AUTH_ENABLED = Boolean(
 const DISPLAY_NAME = process.env.DASHBOARD_TITLE || "Microsoft Rewards";
 const TIMEZONE = process.env.TZ || "UTC";
 const POLL_MS = Math.max(1000, Number(process.env.POLL_MS || 5000));
-const LOG_REPLAY = Number(process.env.LOG_REPLAY || 300);
+// 启动时重放多少行历史日志。300 行在真实的一天里连一个账号都盖不住
+// （2026-10-12 当天 6116 行、7 条 ACCOUNT-END），于是当天已经跑完的账号
+// 在面板重启后依然停在 "运行中"。默认提到能覆盖一整天，仍可用 LOG_REPLAY 覆盖。
+const LOG_REPLAY = Number(process.env.LOG_REPLAY || 20000);
 // Path to the *bot's* .env. Accounts live there, not in this dashboard, and the
 // bot only parses that file at start - so this is the one file the account form
 // writes, and the feature stays off until an operator names it.

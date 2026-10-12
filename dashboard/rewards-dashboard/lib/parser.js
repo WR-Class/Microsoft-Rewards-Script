@@ -17,8 +17,16 @@ const APP_LINE_RE =
 // what the switch branches below expect, so no call site had to change.
 const ACCOUNT_START_RE =
   /^(?:Starting account|开始处理账户):\s*(\S+)\s*\|\s*geoLocale:\s*(.*?)(?:\s*\|\s*locale:.*)?$/;
+// 上游在数字位置写 "null" 时，必须变成真正的 null 而不是 0 或 NaN。
+// Number("null") === NaN，会让下游拿到一个既不是数字也不是"未知"的值。
+const numOrNull = (s) => (s === "null" ? null : Number(s));
+
+// 上游 src/index.ts 在"基线未知"（部分仪表板 / flyout 回退）时会把数字写成 null
+// 而不是数字。原先这里只认 \d+，于是这些行完全匹配不上 —— 结束事件不触发，
+// 账号就永远停在 running。实测 2026-10-12 全天 7 条结束行，7 条全是 null 形式，
+// 也就是说这一天所有跑完的账号都卡住了。
 const ACCOUNT_END_RE =
-  /^(?:Completed account|账户完成):\s*(\S+)\s*\|\s*(?:pointsGained|获得积分)=(-?\d+)\s*\|\s*(?:previousBalance|原余额)=(\d+)\s*\|\s*(?:currentBalance|现余额)=(\d+)\s*\|\s*(?:durationSeconds|持续秒数)=([\d.]+)$/;
+  /^(?:Completed account|账户完成):\s*(\S+)\s*\|\s*(?:pointsGained|获得积分)=(-?\d+|null)\s*\|\s*(?:previousBalance|原余额)=(\d+|null)\s*\|\s*(?:currentBalance|现余额)=(\d+|null)\s*\|\s*(?:durationSeconds|持续秒数)=([\d.]+)$/;
 // English "email: message"; the fork logs "email | 错误=message".
 const ACCOUNT_ERR_RE = /^(\S+@\S+)(?::\s*|\s*\|\s*错误=)([\s\S]*)$/;
 
@@ -40,8 +48,11 @@ const FLOW_FAILED_RE =
   /^(?:(?:Mobile|Desktop) flow failed for\s)?(\S+@\S+)\s*(?::|的[^:]*流程失败:)\s*([\s\S]*)$/;
 const RUN_START_RE =
   /^(?:Starting Microsoft Rewards Script|启动微软奖励脚本)\s*\|\s*v([\w.\-]+)\s*\|\s*(?:Accounts|账户数):\s*(\d+)\s*\|\s*(?:Clusters|集群数):\s*(\d+)$/;
+// 同一原因：全部账户完成那一行现在可能带 "（另有 N 个账号基线未知，未计入）" 这种
+// 括注，夹在数字和 " | " 之间，所以每个数字后面都允许一个可选的中文括注；
+// 数字本身也可能是 null。
 const RUN_END_RE =
-  /^(?:Completed all accounts|全部账户完成)\s*\|\s*(?:accountsProcessed|处理账户数)=(\d+)\s*\|\s*(?:pointsGained|获得积分)=(-?\d+)\s*\|\s*(?:previousBalance|原余额)=(\d+)\s*\|\s*(?:currentBalance|现余额)=(\d+)\s*\|\s*(?:runtimeMinutes|运行分钟数)=([\d.]+)$/;
+  /^(?:Completed all accounts|全部账户完成)\s*\|\s*(?:accountsProcessed|处理账户数)=(\d+)\s*\|\s*(?:pointsGained|获得积分)=(-?\d+|null)(?:（[^）]*）)?\s*\|\s*(?:previousBalance|原余额)=(\d+|null)(?:（[^）]*）)?\s*\|\s*(?:currentBalance|现余额)=(\d+|null)(?:（[^）]*）)?\s*\|\s*(?:runtimeMinutes|运行分钟数)=([\d.]+)$/;
 // src/index.ts's waitBeforeNextAccount() - with accountDelay, accounts start
 // one at a time now rather than together, so this wait can be a large
 // fraction of the run's total time.
@@ -161,13 +172,15 @@ function parseLine(rawLine) {
     case "ACCOUNT-END": {
       const am = ACCOUNT_END_RE.exec(message);
       if (am) {
+        // 上游用 null 表示"不知道"。必须原样变成 null：Number("null") 是 NaN，
+        // 而当成 0 更糟 —— 那等于把"不知道"写成"没赚到"。
         return {
           ...base,
           kind: "account-end",
           email: am[1],
-          gained: Number(am[2]),
-          oldPoints: Number(am[3]),
-          newPoints: Number(am[4]),
+          gained: numOrNull(am[2]),
+          oldPoints: numOrNull(am[3]),
+          newPoints: numOrNull(am[4]),
           durationSec: Number(am[5]),
         };
       }
@@ -199,9 +212,9 @@ function parseLine(rawLine) {
           ...base,
           kind: "run-end",
           accountsProcessed: Number(am[1]),
-          totalGained: Number(am[2]),
-          oldTotal: Number(am[3]),
-          newTotal: Number(am[4]),
+          totalGained: numOrNull(am[2]),
+          oldTotal: numOrNull(am[3]),
+          newTotal: numOrNull(am[4]),
           runtimeMin: Number(am[5]),
         };
       }
