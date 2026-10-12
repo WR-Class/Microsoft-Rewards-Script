@@ -122,7 +122,7 @@ function renderExits() {
         ? `<ul class="runacc-list">${(run.accounts || [])
           .map(
             (a) => `<li class="runacc">
-                            ${U.statusPill(a.success === false ? "error" : "success")}
+                            ${U.statusPill(a.success === false ? "error" : a.success === true ? "success" : "pending")}
                             <span class="runacc-email">${U.escapeHtml(a.email)}</span>
                             <span class="runacc-detail">${U.escapeHtml(a.error ? a.error : `${U.fmtSigned(a.collected)} pts`)}</span>
                           </li>`,
@@ -134,7 +134,7 @@ function renderExits() {
                 <button type="button" class="exit-head" data-exit="${i}" aria-expanded="${isOpen}">
                     ${exitPill(run.exit)}
                     <span class="exit-when">${U.escapeHtml(U.fmtDateTime(run.endedAt || run.startedAt))}</span>
-                    <span class="exit-meta">${U.fmtSigned(run.collected || 0)} pts \u00b7 ${ok} ok${failed ? ` \u00b7 ${failed} failed` : ""}</span>
+                    <span class="exit-meta">${run.collected != null ? U.fmtSigned(run.collected) : "\u2013"} pts \u00b7 ${ok} ok${failed ? ` \u00b7 ${failed} failed` : ""}</span>
                     <span class="exit-chevron" aria-hidden="true">${isOpen ? "\u25BE" : "\u25B8"}</span>
                 </button>
                 ${detail}
