@@ -121,10 +121,11 @@ function renderStats(root, status) {
   const runs = data?.runs || [];
   const lastRun = runs.find((r) => r.status === "done") || runs[0] || null;
 
-  // 与失败原因那一栏同口径：lib/failureReasons.js:92 也是按 lastError 非空筛选的。
-  // 以前这里是 status === "error" —— 一个上一轮失败过、此刻正在重跑的账号会被失败
-  // 原因那栏算进去、被这个统计卡漏掉，同一屏两个数问的不是同一件事。
-  const errorCount = accounts.filter((a) => a && a.lastError).length;
+  // 这里数的是"此刻处于错误状态"的账号；失败原因那一栏（lib/failureReasons.js:92）
+  // 数的是"最近失败过"（lastError 非空）—— 两个不同的问题，各自都有意义，都保留。
+  // 代价是它们会在"上一轮失败、此刻正在重跑"这类账号上分开，所以标签必须各自说清，
+  // 不能让人以为在看同一个数。（曾经把这里改成 lastError 口径来对齐，那是丢信息。）
+  const errorCount = accounts.filter((a) => a.status === "error").length;
   const anyRunning = accounts.some((a) => a.status === "running");
   const combined = accounts.reduce((sum, a) => sum + (a.lastPoints || 0), 0);
   const sched = activeSchedule(status);
