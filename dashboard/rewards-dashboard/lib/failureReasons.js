@@ -49,6 +49,21 @@ const REASONS = [
     action: "已修：现在会重新加载并重试一次",
   },
   {
+    // reqwest 是 Rust 的 HTTP 客户端 —— 这条错来自**移动端那一步的 Rust 组件**，
+    // 不是浏览器侧，所以浏览器那些规则都接不住它。UnexpectedEof 的意思是
+    // 「响应体读到一半连接就断了」。
+    //
+    // 实测依据（2026-10-12，两个账号同形）：
+    //   · 两条都紧跟在「所有浏览器资源已关闭」之后，也就是移动端流程收尾时；
+    //   · 两个账号此前都成功跑完过（jiabaoai403975 当天 09:35、nangonglirui786296
+    //     前一天 22:50 都有正常的 ACCOUNT-END），代码没变 → 不是账号或密码问题；
+    //   · 同一轮里两个不同账号在同一阶段同形失败 → 更像那一刻的网络/服务端。
+    // 具体是哪个 Rust 组件我没在仓库里找到（在依赖里），所以只断言到能确认的程度。
+    re: /reading response stream|reqwest::Error|UnexpectedEof/i,
+    cause: "移动端那一步的响应体被中途截断（Rust 侧 reqwest 报 UnexpectedEof）—— 网络/服务端层面，不是账号或密码问题",
+    action: "这类会随下一次运行重试；同一轮里多个账号同时出现时，先看那一刻的本机网络与代理",
+  },
+  {
     re: /peer closed connection|close_notify|ECONNRESET|socket hang up/i,
     cause: "到微软的连接被重置（网络/代理层面，不是代码问题）",
     action: "会自动重试；频繁出现时先查本机网络与代理",
