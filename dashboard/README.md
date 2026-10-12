@@ -124,7 +124,7 @@ Above the tabs, a control strip is always visible: **Start**, **Stop**, **Restar
 | `TZ`                  | `UTC`                                  | Buckets points into days - set it                                                         |
 | `DASHBOARD_TITLE`     | `Microsoft Rewards`                    | Header title                                                                              |
 | `POLL_MS`             | `5000`                                 | Status poll interval (logs are streamed)                                                  |
-| `LOG_REPLAY`          | `300`                                  | Log lines to replay when the stream connects                                              |
+| `LOG_REPLAY`          | `20000`                                  | Log lines to replay when the stream connects                                              |
 | `DATA_DIR`            | `./data`                               | Where `dashboard.sqlite` lives - the only folder anything writes to. Docker sets `/data`. |
 
 ---
