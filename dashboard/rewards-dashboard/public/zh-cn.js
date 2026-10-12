@@ -466,6 +466,11 @@ const RULES = [
   [/^Microsoft Rewards Dashboard: (.+)$/, "微软积分面板：$1"],
   // Overview card while an account's run is in flight, e.g.
   // "Running 2h 1m · +244 pts · 6m ago". Must precede the generic "(.+) ago" rule.
+  // 账号卡片副标题。Running 分支下面三条一直有，Last Run 分支一条都没有 ——
+  // 而 /^(.+) ago$/ 是锚定整串的，匹配不到 "Last Run: 5m ago"，于是只有它漏翻。
+  // 先放带 ago 的（把相对时间也翻掉），再放兜底的。
+  [/^Last Run: (.+) ago$/, "上次运行：$1 前"],
+  [/^Last Run: (.+)$/, "上次运行：$1"],
   [/^Running (.+?) \u00b7 \+([\d,.]+) pts \u00b7 (.+) ago$/, "运行 $1 · 本轮 +$2 分 · 最后得分 $3 前"],
   [/^Running (.+?) \u00b7 \+([\d,.]+) pts$/, "运行 $1 · 本轮 +$2 分"],
   [/^Running (.+)$/, "运行 $1"],
