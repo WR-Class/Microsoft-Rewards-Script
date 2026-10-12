@@ -199,8 +199,15 @@ function parseLine(rawLine) {
       break;
     }
     case "FLOW": {
-      // FLOW 是通用标题（今天 665 条），只在这里"试着"认出一种；认不出就 break，
+      // FLOW 是通用标题（今天 665 条），只在这里"试着"认出两种；认不出就 break，
       // 照旧走后面的 generic 处理，不能因为加了这一支就把别的 FLOW 行吃掉。
+      //
+      // 两个分支必须在**同一个 case 标签**里：switch 只认第一个匹配的标签，
+      // 一旦写成两个 case "FLOW"，后面的那个就是永不执行的死代码。
+      // 实测教训：新增完成分支时把失败分支写成了第二个 case "FLOW"，于是
+      // FLOW_FAILED_RE 全文件只有一个使用点却永远走不到 —— 失败的账号再也
+      // 标不上 account-error，RUN-END 时被 markAccountCompletedWithoutResult
+      // 写成 success，界面把失败的账号显示成"成功"。
       const fm = FLOW_POINTS_COLLECTED_RE.exec(message);
       if (fm) {
         return {
@@ -212,6 +219,21 @@ function parseLine(rawLine) {
           newPoints: numOrNull(fm[1]),
           durationSec: null, // 这一行不带持续秒数
         };
+      }
+      // 失败行。复用已有的 account-error 事件类型（不新增 kind），因为 store 的
+      // 结算计数和孤儿清理都按 title === 'ACCOUNT-ERROR' 走，这样不用改 store.js
+      // 就能接上；原始的 FLOW 标题和正文仍可从 raw 完整恢复。
+      if (level.toLowerCase() === "error") {
+        const ff = FLOW_FAILED_RE.exec(message);
+        if (ff) {
+          return {
+            ...base,
+            title: "ACCOUNT-ERROR",
+            kind: "account-error",
+            email: ff[1],
+            error: ff[2],
+          };
+        }
       }
       break;
     }
@@ -282,26 +304,6 @@ function parseLine(rawLine) {
         return { ...base, kind: "login-number", number: numMatch[1] };
       if (LOGIN_NUMBER_RESOLVED_RE.test(message)) {
         return { ...base, kind: "login-number-resolved" };
-      }
-      break;
-    }
-    case "FLOW": {
-      // Reuses the existing "account-error" event kind (not a new kind) so
-      // the store's resolution-counting and orphan-cleanup logic - all of
-      // which is keyed off title === 'ACCOUNT-ERROR', not "kind" - picks
-      // this up for free with no store.js changes needed. The original
-      // "FLOW" title/message are still fully recoverable from `raw`.
-      if (level.toLowerCase() === "error") {
-        const fm = FLOW_FAILED_RE.exec(message);
-        if (fm) {
-          return {
-            ...base,
-            title: "ACCOUNT-ERROR",
-            kind: "account-error",
-            email: fm[1],
-            error: fm[2],
-          };
-        }
       }
       break;
     }
