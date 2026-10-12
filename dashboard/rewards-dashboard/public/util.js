@@ -167,6 +167,11 @@ export function bucketByDay(history) {
   const days = new Map();
   let prevPoints = null;
   for (const h of history) {
+    // 余额未知的行不参与差值链：points == null 的意思是"这次没读到余额"，
+    // 不是"余额变成 0"。当成 0 会凭空造出一次暴跌 —— 实测 2026-10-12：一条
+    // 现余额=null 的结束行让当天算成 -549，界面显示成 "+-490"。
+    // 既不累加，也不推进 prevPoints，让下一条有余额的行接着上一条比。
+    if (h.points == null) continue;
     const trueGained = prevPoints == null ? (h.gained ?? 0) : h.points - prevPoints;
     prevPoints = h.points;
 

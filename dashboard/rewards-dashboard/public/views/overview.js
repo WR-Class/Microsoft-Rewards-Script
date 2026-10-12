@@ -263,7 +263,7 @@ function renderAccountRows(root) {
 
       const todayText =
         todayGained != null
-          ? `+${todayGained.toLocaleString()}\u202fpts today`
+          ? `${U.fmtSigned(todayGained)}\u202fpts today`
           : a.status === "running"
             ? "Running\u2026"
             : "No run today";
