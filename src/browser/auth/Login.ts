@@ -548,6 +548,28 @@ export class Login {
         return false
     }
 
+    /**
+     * passwordless 挑战是否已经出现。与 hasLeftKmsiPrompt 同一个理由：点击报失败不等于
+     * 没点中 —— ghostClick 用 elementHandle.evaluate 判断点击成功，而导航会销毁那个
+     * evaluate，一次成功的点击被读成失败。这两步点击的目的就是让挑战出现，所以"挑战
+     * 出现"就是那一步成功的证据。给它几秒钟等跳转，超时不算成功。
+     */
+    private async hasPasswordlessChallengeAppeared(page: Page): Promise<boolean> {
+        const deadline = Date.now() + 5000
+
+        while (Date.now() < deadline) {
+            if (
+                (await this.checkSelector(page, this.selectors.passwordlessCheck)) ||
+                (await this.checkSelector(page, this.selectors.passwordlessNumber))
+            ) {
+                return true
+            }
+            await this.bot.utils.wait(500)
+        }
+
+        return false
+    }
+
     private logAvailableSignInMethods(options: SignInMethodOption[]): void {
         if (this.signInMethodsLogged) return
         this.signInMethodsLogged = true
@@ -676,8 +698,19 @@ export class Login {
                 this.bot.logger.info(this.bot.isMobile, 'LOGIN', '继续使用主要登录方式')
                 const clicked = await this.clickPrimaryButton(page, 'PASSWORDLESS_SEND_CODE')
                 if (!clicked) {
-                    this.bot.logger.warn(this.bot.isMobile, 'LOGIN', '无法继续使用主要登录方式')
-                    return false
+                    // 点击报失败不等于没点中（导航会销毁 ghostClick 的 evaluate，见
+                    // hasLeftKmsiPrompt）。这一步的目的就是让挑战出现，挑战出现了就按成功
+                    // 处理，而不是把一次已经成功的登录判成失败。
+                    if (await this.hasPasswordlessChallengeAppeared(page)) {
+                        this.bot.logger.info(
+                            this.bot.isMobile,
+                            'LOGIN',
+                            '挑战已出现（点击触发了跳转），按成功处理'
+                        )
+                    } else {
+                        this.bot.logger.warn(this.bot.isMobile, 'LOGIN', '无法继续使用主要登录方式')
+                        return false
+                    }
                 }
                 await this.waitForIdle(page, 'after primary sign-in action')
                 return true
@@ -740,13 +773,22 @@ export class Login {
                             'Microsoft Authenticator request'
                         )
                         if (!confirmed) {
-                            this.passwordlessMethodSelected = false
-                            this.bot.logger.warn(
-                                this.bot.isMobile,
-                                'LOGIN',
-                                '无法发送Microsoft Authenticator请求'
-                            )
-                            return false
+                            // 同上：请求可能已经发出去了，只是成功信号被导航销毁。
+                            if (await this.hasPasswordlessChallengeAppeared(page)) {
+                                this.bot.logger.info(
+                                    this.bot.isMobile,
+                                    'LOGIN',
+                                    '挑战已出现（点击触发了跳转），按请求已发送处理'
+                                )
+                            } else {
+                                this.passwordlessMethodSelected = false
+                                this.bot.logger.warn(
+                                    this.bot.isMobile,
+                                    'LOGIN',
+                                    '无法发送Microsoft Authenticator请求'
+                                )
+                                return false
+                            }
                         }
                         await this.waitForIdle(page, 'after Microsoft Authenticator request')
                     }
