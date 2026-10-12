@@ -71,16 +71,21 @@ const LOG_DIR = resolveLogDir({
 // 路径提前改成 success，那恰恰是"还没补过"的信号，不是"不需要补"的信号。
 // 用不带过滤的 allHistories（不是 allHistoriesSince，那个要 since 参数），
 // 索引在补录之前建一次就够：latest 每个账号只留一条终态，同一次启动不会重复应用。
+//
+// 键截到秒：实时和补录对同一个事件算出的纳秒来自不同来源（实时用控制 API 的
+// entry.id，补录用自己的 seq 计数器），所以完整 ts 上永远不冲突 —— 必须用秒级键，
+// 重复才会在**源头**就不被尝试。唯一索引 idx_history_email_sec_unique 是第二道保险。
+const secKey = (email, ts) =>
+  `${String(email).trim().toLowerCase()}\u0000${String(ts).slice(0, 19)}`;
 const historyKeys = new Set();
 for (const r of store.stmts.allHistories.all()) {
-  historyKeys.add(`${String(r.email).trim().toLowerCase()}\u0000${r.ts}`);
+  historyKeys.add(secKey(r.email, r.ts));
 }
 const backfill = replayLogFiles({
   dir: LOG_DIR,
   rows: store.snapshotAccounts(),
   apply: (event, opts) => store.apply(event, opts),
-  hasHistory: (email, ts) =>
-    historyKeys.has(`${String(email).trim().toLowerCase()}\u0000${ts}`),
+  hasHistory: (email, ts) => historyKeys.has(secKey(email, ts)),
   // 只写历史、不动账号状态的那条通道：当天更早的结束靠它补齐（整条 apply 一个
   // 账号只推最新一条，更早的会被 lastStartAt 守卫挡下）。
   recordHistory: (event) =>

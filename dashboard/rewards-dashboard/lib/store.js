@@ -159,24 +159,36 @@ class Store {
         `);
       }
     }
-    // 同一 (email, ts) 存两遍：实时路径和启动补录会写同一个事件（补录走
-    // backfill:true，而那个标志的作用正是跳过时间戳守卫），于是两个写入方互不排斥。
+    // 同一个事件被写两遍：实时路径和启动补录都会写它（补录走 backfill:true，
+    // 而那个标志的作用正是跳过时间戳守卫），两个写入方互不排斥。
     // 实测 2026-10-12：2 个账号完成，行数 +4。
+    //
+    // 键必须取到**秒**，不能取完整 ts：两条路算出的纳秒来自不同来源（实时用控制
+    // API 的 entry.id，补录用自己的 seq 计数器），同一个事件得到的是"同一秒、
+    // 不同纳秒"的两个 ts，在完整 ts 上永远不冲突。
+    // 秒级键会撞的只有"同一个账号一秒内完成两次"；一轮要几分钟、一次运行只产生
+    // 一条 account-end，所以它不丢任何真实数据。
+    // 也不能反过来把 ts 本身降到秒级：ts 同时是事件排序键（store.apply 的单调守卫
+    // event.ts <= _lastTs 就丢弃），降精度会把同一秒里的其它事件一起丢掉。
+    //
     // 去重必须排在建唯一索引**之前** —— 已有重复行时建唯一索引会直接失败。
     // 保留 MIN(id)（先写进去的那条），并且只在索引还不存在时做一次。
     {
       const hasUnique = this.db
         .prepare(
-          "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_history_email_ts_unique'",
+          "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_history_email_sec_unique'",
         )
         .get();
       if (!hasUnique) {
         this.db.exec(`
           DELETE FROM account_history
-            WHERE id NOT IN (SELECT MIN(id) FROM account_history GROUP BY email, ts);
+            WHERE id NOT IN (
+              SELECT MIN(id) FROM account_history GROUP BY email, substr(ts, 1, 19)
+            );
           DROP INDEX IF EXISTS idx_history_email_ts;
-          CREATE UNIQUE INDEX IF NOT EXISTS idx_history_email_ts_unique
-            ON account_history(email, ts);
+          DROP INDEX IF EXISTS idx_history_email_ts_unique;
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_history_email_sec_unique
+            ON account_history(email, substr(ts, 1, 19));
         `);
       }
     }
