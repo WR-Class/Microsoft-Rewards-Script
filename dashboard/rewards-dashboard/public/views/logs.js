@@ -211,7 +211,11 @@ export default {
     try {
       const res = await ctx.api.logs(500);
       for (const e of res.logs || []) addEntry(e, false);
-    } catch {
+    } catch (e) {
+      // 以前这里是空的 catch {}：抓取失败被完全吞掉，紧接着 renderAll() 把界面渲染成
+      // "没有匹配的日志行" —— 把一次网络故障说成"确实没有日志"，是最坏的一种误导。
+      // 同文件上面的导出路径本来就是用 toast 报错的，这里保持一致。
+      U.toast(`日志加载失败：${e.message}`, "error");
     }
     renderAll();
   },
