@@ -154,6 +154,7 @@ function replayLogFiles({
   rows = [],
   apply,
   hasHistory = null,
+  recordHistory = null,
   log = () => {},
 }) {
   const files = listRecentLogFiles(dir, days);
@@ -164,6 +165,10 @@ function replayLogFiles({
 
   // 第一步：扫日志，留下每个账号最后一条终态事件。
   const latest = new Map();
+  // 每一条终态都留一份（按 (email, ts) 去重）。latest 只用来把账号状态推到最新，
+  // 历史表却需要当天更早那几次结束 —— 否则"今天"的差值会从好几天前算起。
+  const allTerminal = [];
+  const seenTerminal = new Set();
   let lines = 0;
   let malformed = 0;
   let terminal = 0;
@@ -213,6 +218,11 @@ function replayLogFiles({
       if (!prev || Date.parse(event.ts) >= Date.parse(prev.ts)) {
         latest.set(event.email, event);
       }
+      const terminalKey = `${event.email.trim().toLowerCase()}\u0000${event.ts}`;
+      if (!seenTerminal.has(terminalKey)) {
+        seenTerminal.add(terminalKey);
+        allTerminal.push(event);
+      }
     }
   }
 
@@ -225,6 +235,7 @@ function replayLogFiles({
 
   let applied = 0;
   let unmatched = 0;
+  const appliedKeys = new Set(); // 整条 apply 刚写过的历史行，第三遍要跳过
   for (const [email, event] of latest) {
     const row = byEmail.get(email.trim().toLowerCase());
     if (!row) {
@@ -256,12 +267,33 @@ function replayLogFiles({
       // 否则日志里会出现"应用 0 条"而状态其实已经改了的误导性输出。
       apply(event, { backfill: true });
       applied++;
+      appliedKeys.add(`${email.trim().toLowerCase()}\u0000${event.ts}`);
     } catch (e) {
       log("warn", `日志补录：${email} 应用失败 ${e.message}`);
     }
   }
 
-  return { files, lines, malformed, terminal, applied, unmatched };
+  // 第三步：把**当天更早那些**结束补进历史表 —— 只写历史，不动账号状态。
+  // 上面的整条 apply 一个账号只推最新一条（而且受 lastStartAt 守卫，免得把账号
+  // 状态往回退），所以更早的结束只能走这条只写历史的路。没有 recordHistory
+  // 就整段跳过：宁可少补，也不要重复插。
+  let historyAdded = 0;
+  if (typeof recordHistory === "function" && typeof hasHistory === "function") {
+    for (const event of allTerminal) {
+      if (event.kind !== "account-end") continue; // account-error 不进历史表
+      const key = `${event.email.trim().toLowerCase()}\u0000${event.ts}`;
+      if (appliedKeys.has(key)) continue; // 刚被整条 apply 写过，别插第二遍
+      if (hasHistory(event.email, event.ts)) continue; // 早就有了
+      try {
+        recordHistory(event);
+        historyAdded++;
+      } catch (e) {
+        log("warn", `日志补录：${event.email} 写历史失败 ${e.message}`);
+      }
+    }
+  }
+
+  return { files, lines, malformed, terminal, applied, historyAdded, unmatched };
 }
 
 module.exports = {

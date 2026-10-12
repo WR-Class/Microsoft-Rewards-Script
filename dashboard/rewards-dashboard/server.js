@@ -81,11 +81,21 @@ const backfill = replayLogFiles({
   apply: (event, opts) => store.apply(event, opts),
   hasHistory: (email, ts) =>
     historyKeys.has(`${String(email).trim().toLowerCase()}\u0000${ts}`),
+  // 只写历史、不动账号状态的那条通道：当天更早的结束靠它补齐（整条 apply 一个
+  // 账号只推最新一条，更早的会被 lastStartAt 守卫挡下）。
+  recordHistory: (event) =>
+    store.stmts.insertHistory.run(
+      event.email,
+      event.ts,
+      event.newPoints,
+      event.gained,
+      event.durationSec,
+    ),
   log,
 });
 log(
   "info",
-  `日志补录 ${LOG_DIR}：读 ${backfill.lines} 行 / 终态 ${backfill.terminal} 条 / 应用 ${backfill.applied} 条` +
+  `日志补录 ${LOG_DIR}：读 ${backfill.lines} 行 / 终态 ${backfill.terminal} 条 / 应用 ${backfill.applied} 条 / 补历史 ${backfill.historyAdded} 条` +
     (backfill.unmatched ? ` / store 里没有的账号 ${backfill.unmatched} 个` : ""),
 );
 
