@@ -1,4 +1,4 @@
-import { escapeAttr, escapeHtml, fmtNumber, localDateLabel, tzDayKey } from "./util.js";
+import { escapeAttr, escapeHtml, fmtNumber, fmtSigned, localDateLabel, tzDayKey } from "./util.js";
 
 const PAD = { left: 46, right: 14, top: 14, bottom: 26 };
 
@@ -127,7 +127,7 @@ export function barChart(
       const cx = PAD.left + slot * i + slot / 2;
       const y = yOf(b.value);
       const h = Math.max(b.value > 0 ? 2 : 0, baseY - y);
-      const title = `${localDateLabel(b.key, { weekday: "short", month: "short", day: "numeric" })}: +${fmtNumber(b.value)} points${b.sub ? ` (${b.sub})` : ""}`;
+      const title = `${localDateLabel(b.key, { weekday: "short", month: "short", day: "numeric" })}: ${fmtSigned(b.value)} points${b.sub ? ` (${b.sub})` : ""}`;
       return `<rect class="chart-bar" x="${(cx - barW / 2).toFixed(1)}" y="${(baseY - h).toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" rx="2"><title>${escapeAttr(title)}</title></rect>`;
     })
     .join("");
@@ -272,7 +272,7 @@ export function buildHeatmapHtml(days) {
       ].filter(Boolean).join(" ");
 
       const title = entry
-        ? `${localDateLabel(key, { weekday: "long", month: "short", day: "numeric" })}\n+${entry.gained.toLocaleString()} pts\nTotal ${entry.lastTotal.toLocaleString()}`
+        ? `${localDateLabel(key, { weekday: "long", month: "short", day: "numeric" })}\n+${fmtSigned(entry.gained)} pts\nTotal ${entry.lastTotal.toLocaleString()}`
         : localDateLabel(key, { weekday: "long", month: "short", day: "numeric" });
 
       gridHtml += `<div class="${cls}" title="${escapeAttr(title)}"></div>`;
@@ -321,7 +321,7 @@ export function buildAccumBarHtml(days, globalMaxGained, maxDays = null) {
       month: "short",
       day: "numeric",
     });
-    html += `<div class="accum-week-marker" title="Week of ${escapeAttr(label)}: +${weekGained.toLocaleString()} pts"></div>`;
+    html += `<div class="accum-week-marker" title="Week of ${escapeAttr(label)}: ${fmtSigned(weekGained)} pts"></div>`;
     weekGained = 0;
   };
 
@@ -358,7 +358,7 @@ export function buildAccumBarHtml(days, globalMaxGained, maxDays = null) {
     const opacity = (0.35 + 0.65 * (i / (len - 1 || 1))).toFixed(2);
     altToggle = !altToggle;
 
-    html += `<div class="accum-day ${altToggle ? "accum-day--a" : "accum-day--b"}${isToday ? " accum-day--today" : ""}" style="height:${heightPct}%;opacity:${opacity}" title="${escapeAttr(dateLabel)}${isToday ? " (today)" : ""}: +${day.gained.toLocaleString()} pts (total: ${day.lastTotal.toLocaleString()})"></div>`;
+    html += `<div class="accum-day ${altToggle ? "accum-day--a" : "accum-day--b"}${isToday ? " accum-day--today" : ""}" style="height:${heightPct}%;opacity:${opacity}" title="${escapeAttr(dateLabel)}${isToday ? " (today)" : ""}: ${fmtSigned(day.gained)} pts (total: ${day.lastTotal.toLocaleString()})"></div>`;
   }
 
   return html;

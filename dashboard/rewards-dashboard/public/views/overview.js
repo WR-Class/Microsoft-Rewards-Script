@@ -273,14 +273,25 @@ function renderAccountRows(root) {
       if (accountHistory.length >= 2) {
         const latest = accountHistory[accountHistory.length - 1];
         const previous = accountHistory[accountHistory.length - 2];
-        const trueGain = latest.points - previous.points;
-        const selfReported = latest.gained ?? 0;
-        const other = trueGain - selfReported;
+        // points 可能为 null（那次结束没读到余额）；gained 为 null 表示"基线未知，
+        // 差额不知道"，不是 0。以前写成 `latest.gained ?? 0`，于是 other === trueGain，
+        // 界面渲染出 "0+121 pts" 这种伪造的分解 —— 和 util.js bucketByDay 里那个
+        // null 当 0 是同一类，只是这里漏改了。
+        const trueGain =
+          latest.points != null && previous.points != null
+            ? latest.points - previous.points
+            : null;
+        const selfReported = latest.gained;
+        const other =
+          trueGain != null && selfReported != null ? trueGain - selfReported : null;
         const gainText =
-          other !== 0
-            ? `${U.fmtSigned(selfReported)}${other >= 0 ? "+" : "-"}${Math.abs(other).toLocaleString()} pts`
-            : `${U.fmtSigned(trueGain)} pts`;
-        gainHtml = ` \u00b7 <span class="gain-val" title="Change in points since last check-in from all sources">${gainText}</span>`;
+          trueGain == null
+            ? null
+            : other != null && other !== 0
+              ? `${U.fmtSigned(selfReported)}${other >= 0 ? "+" : "-"}${Math.abs(other).toLocaleString()} pts`
+              : `${U.fmtSigned(trueGain)} pts`;
+        if (gainText != null)
+          gainHtml = ` \u00b7 <span class="gain-val" title="Change in points since last check-in from all sources">${gainText}</span>`;
       }
 
       const dur = a.lastDurationSec != null ? U.fmtDuration(a.lastDurationSec) : null;
@@ -297,7 +308,7 @@ function renderAccountRows(root) {
       const sub =
         isRunning
           ? `<span class="hero-sub-running">Running ${U.escapeHtml(U.fmtDuration(elapsedSec))}${
-              a.liveGained != null ? ` \u00b7 +${U.fmtNumber(a.liveGained)} pts` : ""
+              a.liveGained != null ? ` \u00b7 ${U.fmtSigned(a.liveGained)} pts` : ""
             }${a.lastActivityAt ? ` \u00b7 ${U.escapeHtml(U.fmtRelative(a.lastActivityAt))}` : ""}</span>`
           : `Last Run: ${U.escapeHtml(U.fmtRelative(a.lastEndAt || a.lastStartAt))}${
               dur ? ` \u00b7 <span title="Last run duration">⏱ ${U.escapeHtml(dur)}</span>` : ""
@@ -315,7 +326,7 @@ function renderAccountRows(root) {
                 <span class="hero-stat-label">Points</span>
             </div>
             <div class="hero-stat">
-                <span class="hero-stat-num">${todayGained != null ? `+${U.fmtNumber(todayGained)}` : "\u2013"}</span>
+                <span class="hero-stat-num">${todayGained != null ? U.fmtSigned(todayGained) : "\u2013"}</span>
                 <span class="hero-stat-label">Today</span>
             </div>
             <div class="hero-stat" title="${U.escapeAttr(tasksTitle)}">
