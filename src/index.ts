@@ -63,7 +63,14 @@ interface AccountStats {
 interface AccountRunResult {
     /** null = 基线没有测量到。不要退回 0，那会把"没读到"变成"原本是 0 分"。 */
     initialPoints: number | null
+    /** 差额。基线未知时算不出来（那时为 0），所以它**不是**"赚了 0 分"的证据。 */
     collectedPoints: number
+    /**
+     * 结束时的余额。基线未知时差额未知，但余额本身往往读到了 —— 这一项就是用来
+     * 把那个已知的观测值带到汇总和结束行去的。缺了它，实测出现过整轮汇总写成
+     * "获得积分=0 / 现余额=0"，而实际赚了 783。
+     */
+    finalPoints?: number | null
     skippedForBotWarning?: boolean
 }
 
@@ -614,10 +621,13 @@ export class MicrosoftRewardsBot {
                 if (result) {
                     const collectedPoints = result.collectedPoints ?? 0
                     const accountInitialPoints = result.initialPoints
-                    // 基线未知时最终余额也是未知的 —— 不能让 null + number 悄悄算出一个数
+                    // 基线未知时**差额**算不出来，但不能因此把"现在余额"也丢掉：
+                    // 基线未知那条路径读到了余额，并且把它放在 result.finalPoints 里带出来了。
+                    // 只有真正没读到余额时才是 null —— 绝不能让 null + number 悄悄算出一个数
                     // （JS 里 null + 5 === 5，那会把"没读到"伪装成一个具体余额）。
                     const accountFinalPoints =
-                        accountInitialPoints === null ? null : accountInitialPoints + collectedPoints
+                        result.finalPoints ??
+                        (accountInitialPoints === null ? null : accountInitialPoints + collectedPoints)
 
                     if (result.skippedForBotWarning) {
                         accountStats.push({
@@ -648,7 +658,7 @@ export class MicrosoftRewardsBot {
                         this.logger.info(
                             'main',
                             'ACCOUNT-END',
-                            `账户完成: ${accountEmail} | 获得积分=${collectedPoints} | 原余额=${accountInitialPoints} | 现余额=${accountFinalPoints} | 持续秒数=${durationSeconds}`,
+                            `账户完成: ${accountEmail} | 获得积分=${accountInitialPoints === null ? 'null' : collectedPoints} | 原余额=${accountInitialPoints} | 现余额=${accountFinalPoints} | 持续秒数=${durationSeconds}`,
                             'green'
                         )
                     }
@@ -1250,9 +1260,14 @@ export class MicrosoftRewardsBot {
                         `积分已收集（基线未知，不报差额） | 现余额=${finalPoints} | 账户=${accountEmail}`
                     )
 
+                    // 差额确实算不出来（基线未知），但"现在余额是多少"是**读到了**的，
+                    // 上面那行日志刚刚打过它。必须把它带出去，否则汇总和结束行会丢掉一个
+                    // 已知的观测值 —— 实测 2026-10-12 十个账号里九个这样，整轮汇总
+                    // 因此写成"获得积分=0"，而 run.live 记的实际是 783。
                     return {
                         initialPoints: null,
-                        collectedPoints: 0
+                        collectedPoints: 0,
+                        finalPoints
                     }
                 }
 

@@ -523,14 +523,19 @@ class Store {
     }
   }
 
-  apply(event) {
+  apply(event, { backfill = false } = {}) {
     if (!event || !event.ts) return false;
 
-    if (this._lastTs && event.ts <= this._lastTs) {
+    // 正常路径：时间戳单调递增，旧事件直接丢弃（SSE 会重发历史）。
+    // 补录路径：进来的就是历史事件，必须允许比水位旧 —— 但水位只升不降，
+    // 否则一次补录会把水位往回拉，之后的实时事件就会被误判成"旧"而丢弃。
+    if (!backfill && this._lastTs && event.ts <= this._lastTs) {
       return false;
     }
-    this._lastTs = event.ts;
-    this._writeMeta("lastTs", event.ts);
+    if (!this._lastTs || event.ts > this._lastTs) {
+      this._lastTs = event.ts;
+      this._writeMeta("lastTs", event.ts);
+    }
 
     let changed = true;
 

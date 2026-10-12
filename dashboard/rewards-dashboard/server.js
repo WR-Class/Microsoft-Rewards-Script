@@ -8,6 +8,7 @@ const crypto = require("node:crypto");
 const { ControlApiClient, entryToDockerLine } = require("./lib/apiClient");
 const { EventHub } = require("./lib/eventHub");
 const { parseLine } = require("./lib/parser");
+const { resolveLogDir, replayLogFiles } = require("./lib/logFileReplay");
 const { Store } = require("./lib/store");
 const { describeCron, isValidCron, nextRun } = require("./lib/cron");
 const { Scheduler } = require("./lib/scheduler");
@@ -55,6 +56,28 @@ const log = (level, msg) => {
   else if (level === "warn") console.warn(line);
   else console.log(line);
 };
+
+// 补录日志文件里 store 还不知道的账号终态。位置很关键：必须在 EventHub 建立
+// 连接之前跑完，否则实时事件先到，补录进来的历史事件会被时间戳守卫挡住。
+// 注意不能用 store.lastTs 当起点 —— 那是全局水位，不是每账号进度，用它会让
+// 所有历史终态都被判为"旧"而整批跳过（实测跳过了 14517 行）。
+// 详见 lib/logFileReplay.js 顶部注释。
+const LOG_DIR = resolveLogDir({
+  botEnvPath: BOT_ENV_PATH,
+  panelDir: __dirname,
+  override: process.env.LOG_DIR || "",
+});
+const backfill = replayLogFiles({
+  dir: LOG_DIR,
+  rows: store.snapshotAccounts(),
+  apply: (event, opts) => store.apply(event, opts),
+  log,
+});
+log(
+  "info",
+  `日志补录 ${LOG_DIR}：读 ${backfill.lines} 行 / 终态 ${backfill.terminal} 条 / 应用 ${backfill.applied} 条` +
+    (backfill.unmatched ? ` / store 里没有的账号 ${backfill.unmatched} 个` : ""),
+);
 
 const hub = new EventHub({ client, replay: LOG_REPLAY, log });
 

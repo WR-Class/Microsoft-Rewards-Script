@@ -25,8 +25,16 @@ const LOG_DIR = path.join(here, '..', '..', 'logs')
 const LINE =
     /^(\d{4}-\d{2}-\d{2}) \d{2}:\d{2}:\d{2}\.\d+ \[[^\]]+\] \[([^\]]+)\] \[(INFO|WARN|DEBUG|ERROR)\] (\S+) \[([A-Z][A-Z0-9-]+)\] (.*)$/
 
+// 上游在"基线未知"（部分仪表板 / flyout 回退）时会写 null 而不是数字：差额确实
+// 算不出来。这里必须接受 null，否则这些行整行匹配不上，报告会把它们当成"没有数据"，
+// 而真相是"跑了，但差额未知"。null 要原样保留，不能 Number("null")（那是 NaN），
+// 更不能当 0 —— 那等于把"没测到"写成"没赚到"。
+const NUM = '(-?\\d+|null)'
+const toNum = (s) => (s === 'null' ? null : Number(s))
 const RE_COLLECTED = /积分已收集 \| 获得积分=(-?\d+) \| 现余额=(-?\d+) \| 账户=(\S+)/
-const RE_ACCOUNT_END = /账户完成: (\S+) \| 获得积分=(-?\d+) \| 原余额=(-?\d+) \| 现余额=(-?\d+)/
+const RE_ACCOUNT_END = new RegExp(
+    `账户完成: (\\S+) \\| 获得积分=${NUM} \\| 原余额=${NUM} \\| 现余额=${NUM}`
+)
 const RE_REMAINING = /剩余搜索积分 \| Edge=(\d+) \| 桌面端=(\d+) \| 移动端=(\d+)/
 
 // 机器人侧新增的两行（src/index.ts）：基线不可信时它会明说，而不是给出一个假差额。
@@ -106,9 +114,9 @@ function rows() {
 
             const end = RE_ACCOUNT_END.exec(message)
             if (end) {
-                row.collected = Number(end[2])
-                row.initialBalance = Number(end[3])
-                row.finalBalance = Number(end[4])
+                row.collected = toNum(end[2])
+                row.initialBalance = toNum(end[3])
+                row.finalBalance = toNum(end[4])
                 row.hasAccountEnd = true
                 continue
             }
