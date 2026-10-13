@@ -460,5 +460,7 @@ cached("accounts", ctx.api.accounts, 5000),   // → /api/accounts
 4. 数字不够用，就按第 6 节的六层顺序往上加，别跳过 `lib/parser.js`、`lib/store.js`，
    和 `lib/accounts.js` 的 `buildRow()`（白名单，最容易漏的一层）。
 5. **每次改完刷新一遍**（同源静态是 network-first，普通刷新即生效；见 7.1⑥）。
-6. **跑一次 `node tools/check-frontend.mjs`** —— 静态拦住第 8 节里那两类只在运行时
-   才炸、且会被 catch 吞掉的错误。它不做构建，只读文件，几秒钟。
+6. **跑一次 `node tools/check-frontend.mjs`** —— 七项静态检查，拦的都是"不报错、
+   只在特定交互下才坏"的问题。它不做构建，只读文件，几秒钟；有 ❌ 会以非 0 退出。
+   其中 **[6] id 契约 / [7] data-* 契约** 直接对应第 8 节里那两行钩子硬约束 ——
+   这两项是"文档写建议、检查做强制"的落地。

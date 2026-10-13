@@ -250,6 +250,103 @@ why("三种都不是错误 —— 这一节是给设计师的参考：哪些名�
   }
 }
 
+// ── [6] id 契约 ──────────────────────────────────────────────────────────────
+console.log("\n[6] id 契约：被引用的 #id，必须真的有人创建");
+why("id 是 JS 找元素的钩子，而 U.$() 找不到时只返回 null、**不报错** ——");
+why("所以改掉一个 id，会在下一次对它赋值时抛 Cannot read properties of null。");
+why("实测 22 处 U.$(\"#..\") 全部没有 null 守卫，也就是说改一个就够把面板打挂。");
+why("这一节拦的就是这个：引用方还在（JS/CSS/HTML），创建方被改名或删掉了。");
+{
+  // 十六进制颜色会伪装成 id —— style.css 的 34 个色值里有 12 个长这样
+  // （#ffffff / #d7dcdf / #D7A32E ...）。不过滤的话全是假阳性。
+  const isHexLike = (t) =>
+    /^[0-9a-f]{3,4}$/i.test(t) || /^[0-9a-f]{6}$/i.test(t) || /^[0-9a-f]{8}$/i.test(t);
+
+  const refs = new Map();
+  const addRef = (id, who) => {
+    if (!refs.has(id)) refs.set(id, new Set());
+    refs.get(id).add(who);
+  };
+
+  for (const f of jsFiles) {
+    const r = rel(f);
+    if (r === "sw.js") continue;
+    const src = stripJs(read(f));
+    for (const m of src.matchAll(/[#$]{1,2}\(\s*["']#([A-Za-z][\w-]*)["']/g)) addRef(m[1], `js:${r}`);
+    for (const m of src.matchAll(/getElementById\(\s*["']([A-Za-z][\w-]*)["']/g)) addRef(m[1], `js:${r}`);
+  }
+  const cssPath = path.join(publicDir, "style.css");
+  if (fs.existsSync(cssPath)) {
+    for (const m of stripCss(read(cssPath)).matchAll(/#([A-Za-z][\w-]*)/g)) {
+      if (!isHexLike(m[1])) addRef(m[1], "css:style.css");
+    }
+  }
+  if (fs.existsSync(indexHtml)) {
+    const html = stripJs(read(indexHtml));
+    for (const m of html.matchAll(/href="#([A-Za-z][\w-]*)"/g)) addRef(m[1], "html:href");
+    for (const m of html.matchAll(/aria-(?:labelledby|describedby)="([^"]+)"/g)) {
+      for (const w of m[1].split(/\s+/)) if (w) addRef(w, "html:aria");
+    }
+  }
+
+  // 创建方：`id="x"` 标记、setAttribute("id","x")、el.id = "x"
+  const isCreated = (id) =>
+    new RegExp(`id=["']${id}["']`).test(haystack) ||
+    new RegExp(`setAttribute\\(\\s*["']id["']\\s*,\\s*["']${id}["']`).test(haystack) ||
+    new RegExp(`\\.id\\s*=\\s*["']${id}["']`).test(haystack);
+
+  const orphans = [...refs].filter(([id]) => !isCreated(id)).sort();
+  const htmlIds = fs.existsSync(indexHtml)
+    ? [...read(indexHtml).matchAll(/id="([^"]+)"/g)].map((m) => m[1])
+    : [];
+  console.log(`        引用 ${refs.size} 个 id（其中 index.html 里写死 ${htmlIds.length} 个，其余由视图模板生成）`);
+  if (orphans.length) {
+    fail(`${orphans.length} 个 id 有人引用、但没人创建：`);
+    for (const [id, who] of orphans) console.log(`        #${id}   ← ${[...who].join("、")}`);
+    todo("把引用方改回新名字，或在创建处补上 id=\"...\"。改错了不会报错，会在赋值时炸。");
+  } else {
+    ok(`全部 ${refs.size} 个被引用的 id 都有人创建`);
+  }
+}
+
+// ── [7] data-* 契约 ──────────────────────────────────────────────────────────
+console.log("\n[7] data-* 契约：JS 读的属性，必须有人写");
+why("**index.html 里一个 data-* 都没有** —— 全部由视图模板生成。");
+why("所以在视图模板里改了属性名，读它的代码永远读不到值：拿到 undefined，");
+why("静默走默认分支（比如筛选器不再生效），不报错。");
+{
+  const kebab = (s) => s.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
+  const reads = new Map();
+  const addRead = (attr, who) => {
+    if (!reads.has(attr)) reads.set(attr, new Set());
+    reads.get(attr).add(who);
+  };
+  for (const f of jsFiles) {
+    const r = rel(f);
+    if (r === "sw.js") continue;
+    const src = stripJs(read(f));
+    for (const m of src.matchAll(/\.dataset\.([A-Za-z]\w*)/g)) addRead("data-" + kebab(m[1]), `js:${r}`);
+    for (const m of src.matchAll(/dataset\[["']([\w-]+)["']\]/g)) addRead("data-" + m[1], `js:${r}`);
+    for (const m of src.matchAll(/getAttribute\(\s*["'](data-[\w-]+)["']/g)) addRead(m[1], `js:${r}`);
+    for (const m of src.matchAll(/\[(data-[\w-]+)/g)) addRead(m[1], `js:${r}`);
+  }
+
+  const writers = new Set();
+  for (const m of haystack.matchAll(/\b(data-[\w-]+)\s*=/g)) writers.add(m[1]);
+
+  const dangling = [...reads].filter(([a]) => !writers.has(a)).sort();
+  console.log(`        JS 读 ${reads.size} 个，HTML/JS 写 ${writers.size} 个`);
+  if (dangling.length) {
+    warn(`${dangling.length} 个属性被读、但从没被写过：`);
+    for (const [a, who] of dangling) console.log(`        ${a}   ← 读它的地方：${[...who].join("、")}`);
+    todo("大概率是改名/拼写残留，改回去。");
+    todo("也可能是有意留的逃生舱 —— 例如 zh-cn.js 的 SKIP_SELECTOR 里那个 [data-no-i18n]，");
+    todo("它是「标了就别翻译」的开关，目前没人用。这种确认一下即可，不用改。");
+  } else {
+    ok(`JS 读的 ${reads.size} 个属性都有人写`);
+  }
+}
+
 // ── 汇总 ─────────────────────────────────────────────────────────────────────
 console.log("");
 console.log("─".repeat(60));

@@ -24,7 +24,24 @@
 
 ### 2.1 JS 用来找元素的钩子
 
-视图源码用这些属性做选择器和事件绑定，**重命名 = 按钮点了没反应，不报错**：
+两类东西，**重命名都不会报错**，只是功能悄悄没了。
+
+**① `id`** —— 有 **22 个 id** 被 `U.$("#...")` 抓取，**全部没有 null 守卫**：
+
+```
+statusBadge   statusText    modeToggle    modeIcon      themeSelect   tabBar
+ctlPill       ctlDetail     btnStart      btnStop       btnRestart    btnMore
+ctlMenu       btnForceStop  btnShutdown   tabPanels     footerVersion footerStatus
+footerScriptVersion   loginCodesSection   loginCodesList   loginCodesAnnounce
+```
+
+这 22 个都写在 `index.html` 里。另外 `main` 和 `login-codes-heading` 不是 JS 抓的，
+但分别被跳转链接 `href="#main"` 和 `aria-labelledby` 引用，**同样不能改名**。
+
+为什么危险：`U.$()` 找不到元素时**只返回 `null`**，紧接着
+`els.statusText.textContent = ...` 就抛 `Cannot read properties of null`，面板整个挂掉。
+
+**② `data-*` 属性** —— 用它做选择器和事件绑定：
 
 ```
 data-tab            顶部标签切换
@@ -35,12 +52,18 @@ data-arm-delete / data-confirm-delete / data-cancel-delete    账号删除的二
 data-toggle-details / data-diag / data-clear-session / data-tag-remove
 ```
 
+**注意：`index.html` 里一个 `data-*` 都没有** —— 全部由视图模板生成。
+所以这些属性是写在 `public/views/*.js` 的 HTML 模板里的，改那些模板一样会踩。
+
 同一个 class 名可能既是样式钩子又是 JS 钩子。**想改名前先在整个 `public/` 里搜一遍**，
 出现在 `.js` 里的就不是纯样式 class：
 
 ```powershell
 Select-String -Path public\**\*.js -Pattern 'data-confirm-delete'
 ```
+
+**别靠自觉**：这两类都由 `tools/check-frontend.mjs` 的 [6] / [7] 检查。
+改完跑一次就会被点出来（[6] 会让脚本以非 0 退出，卡住提交）。
 
 ### 2.2 文案必须走 i18n key
 
@@ -167,7 +190,7 @@ U.fmtNumber(a.completedTasks)                                        // ✗ 会�
 
 每一节都会印**为什么查**和**怎么办**，所以不用回头翻本文档。
 
-五个检查项：
+七个检查项：
 
 | # | 查什么 | 会怎么坏 |
 |---|---|---|
@@ -176,6 +199,11 @@ U.fmtNumber(a.completedTasks)                                        // ✗ 会�
 | 3 | `zh-cn.js` 里重复的 key | 后一条静默覆盖前一条，改了其中一条不生效 |
 | 4 | `style.css` 里没人用的 class | 多半是 JS 改了名、CSS 没跟上 —— 那条样式静默失效 |
 | 5 | JS 模板里没有 CSS 规则的 class | **不是错误**，分三类列出来供参考（见下） |
+| 6 | 被引用的 `#id` 没人创建 | 改名后 `U.$()` 拿到 `null`，下一次赋值就 `Cannot read properties of null`（**❌ 级**） |
+| 7 | JS 读了、但从没被写过的 `data-*` | 改名后读到 `undefined`，静默走默认分支，不报错 |
+
+第 6 项和第 7 项的当前规模：**102 个 id 被引用**（`index.html` 里写死 24 个，
+其余由视图模板生成），**23 个 `data-*` 被读**。这两项就是 2.1 节那两类钩子的执行版。
 
 第 5 项为什么不是错误：这类 class 有三种来源，性质完全不同 ——
 
