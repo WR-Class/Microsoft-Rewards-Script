@@ -3,7 +3,8 @@
 给要重做仪表盘设计的人看的。**先看第 0 节，否则会对着错的后端设计。**
 
 本文档里每一个端点都对着源码里的路由表核过，每一个路径都确认存在。
-**没核实的部分集中在第 7 节**，那里是我的盲区，不要当成事实。
+**第 7 节分两半**：7.1 是原本的盲区、现已逐条核实（每条都写了证据位置，可当事实用）；
+7.2 是仍未核实的 —— **只有 7.2 里那几条别当事实用**。
 
 ---
 
@@ -45,7 +46,8 @@
    原因是 ② 的日志缓冲区只有 2000 行，而一天的日志有 6000+ 行 —— 只靠 SSE 的话，
    漏掉一条结束行，那个账号就永远停在「运行中」，**重启也救不回来**。详见第 3 节。
 2. **前端没有构建步骤。** `public/` 下的 `.js` 原样被浏览器加载（ESM `import`），
-   改完刷新即生效，没有 webpack/vite。`sw.js` 是 service worker（有缓存，注意强刷）。
+   改完刷新即生效，没有 webpack/vite。`sw.js` 对同源静态是 **network-first**（见 7.1⑥），
+   所以**普通刷新就够，不需要硬刷新**。
 3. **日志是唯一事实源。** 几乎所有数字最终都能追到 `logs/*.log` 的某一行。
 4. **一条日志要经过四个函数才变成面板里的数字**（顺序不能错）：
 
@@ -158,7 +160,7 @@
 | `views/schedule.js` | 调度页 |
 | `themeManager.js` + `themes/*.ts` | 主题（注意：主题是 `.ts`，但有 `lib/tsLite.js` 做轻量转译） |
 | `zh-cn.js` | **i18n 字典。界面文案全部走 key → 中文映射** |
-| `sw.js` | service worker（**有缓存，改完前端记得强刷**） |
+| `sw.js` | service worker：同源静态 **network-first**、跨域 CDN cache-first（见 7.1⑥）。改完普通刷新即生效 |
 
 ### i18n 规则（设计者最容易踩的坑）
 
@@ -255,16 +257,23 @@ cached("accounts", ctx.api.accounts, 5000),   // → /api/accounts
    **不是**"这个账号一共有几个任务"；而 `总数 − 可上报` = **已完成 + 被锁定 + 被禁用**，
    所以"已完成"会略微高估。上游只报 `可上报`，不直接报"已完成" —— 这是它能给的最接近的数。
 
-### 加一个字段的固定动作（五层，缺一层就不显示）
+### 加一个字段的固定动作（六层，缺一层就不显示）
 
 1. **解析** — `lib/parser.js`：在对应 tag 的 case 里从 `message` 抽数字。
-   参考 `REACT-PARSE` 分支（L221 附近，目前只分类不抽数）。
-2. **入库/聚合** — `lib/store.js`：加列或加聚合，按 `(账号, 轮次/日期)` 归集。
-3. **出接口** — `dashboard/rewards-dashboard/server.js`：在 `/api/accounts`
-   或 `/api/summary` 的响应里带上新字段（若数据在控制 API，则先在
-   `scripts/api/server.js` 加端点，再由 `lib/apiClient.js` 取）。
-4. **进前端** — `public/views/overview.js`：从 `a`（账号对象）或 `days` 里读出来。
-5. **文案** — 代码里写英文 key，`public/zh-cn.js` 里加中文映射。
+   参考 `REACT-PARSE` 里 `task-progress` 那条分支（`TASK_ITEMS_RE`）。
+2. **入库/聚合** — `lib/store.js`：在 `_migrate()` 里加列，在 `allAccounts` 的 SELECT 里加别名，
+   并在 `apply()` 里处理写库。按 `(账号, 轮次/日期)` 归集。
+3. **出接口** — `server.js`：在 `/api/accounts` 或 `/api/summary` 的响应里带上新字段
+   （若数据在控制 API，则先在 `scripts/api/server.js` 加端点，再由 `lib/apiClient.js` 取）。
+4. **穿过白名单** — `lib/accounts.js` 的 **`buildRow()`**：加一行 `字段名: local ? local.字段名 : null`。
+   **这是最容易漏的一层**：`/api/accounts` 的 `accounts[]` 走 `mergeAccounts → buildRow`，
+   而 `buildRow` 是显式白名单，store 里的新列**不会自动出现**。
+   （`/api/summary` 的 `accounts` 是 store 原始行、不过这一层 —— 所以字段在两个接口里
+   可见性可能不同。2026-10-13 我就漏了这一层，两格恒显示 `–`，见 41cf1db。）
+5. **进前端** — `public/views/overview.js`：从 `a`（账号对象）或 `days` 里读出来，
+   并加 null 守卫（拿不到要显示 `–`，不要显示 0）。
+6. **文案** — 代码里写英文 key，`public/zh-cn.js` 里加中文映射（或像 `fail-action` 那样
+   直接写中文说明文字；`zh-cn.js` 只重写英文文本节点，中文原样通过）。
 
 ### 这一块的设计意图（用户原话整理）
 
@@ -279,22 +288,136 @@ cached("accounts", ctx.api.accounts, 5000),   // → /api/accounts
 
 ---
 
-## 7. 我没核实的地方（别当事实用）
+## 7. 原盲区：已核实与仍未核实
 
-1. ~~**面板的历史数据到底是自己解析日志，还是走控制 API 的 `/history`。**~~
-   **已核实（2026-10-12）**：两条路都在，分工明确 ——
-   **实时**走 `EventHub` → `parseLine`（`lib/parser.js`）→ `store.apply`；
-   **历史聚合**走控制 API 的 `GET /history`。`lib/parser.js` 是实时链路的核心，
-   不是历史数据的来源。**但 `store` 里那些历史表具体由谁写满，我仍然没有逐行追完。**
-2. **`/api/summary` 与 `/api/accounts` 的完整字段形状。** 我只确认了
-   `accounts[].key/email/status` 和 `days[].dayKey/gained`，没读完 `store.js` 的聚合。
-3. ~~**`days[]` 的时间窗口与分桶规则**（几天？按哪个时区切天？）。~~
-   **已核实（2026-10-13）**：分桶函数是 `public/util.js` 的 `bucketByDay(history)`，
-   产出 `{ dayKey, weekKey, gained, lastTotal }`，`dayKey` 按**面板 TZ**（`U.tzDayKey`）切天。
-   热力图不直接消费 `days`：它按 `weekKey` 重排成周列，日期加减走纯 UTC 的键运算
-   （`charts.js` 的 `keyAddDays` / `keyDayOfWeek`）。**窗口长度（一次喂进来几天）仍未核。**
-4. **主题 `.ts` 如何被浏览器加载**（`tsLite.js` 的转译边界没看）。
-5. **`sw.js` 的缓存策略** —— 我只知道它有缓存，不知道是 cache-first 还是 network-first。
+### 7.1 已核实（每条都写了证据在哪，可以当事实用）
+
+**① `store` 的几张表由谁写满 —— 只有一个入口函数、两个调用方。**
+
+所有写库都汇到 `store.apply(event, { backfill })`（`lib/store.js:629`），调用方只有两个：
+`server.js:210`（实时：`EventHub → entryToDockerLine → parseLine → store.apply`）和
+`lib/logFileReplay.js`（启动补录，带 `backfill: true`）。
+
+| 表 | 谁写 | 关键语句 |
+|---|---|---|
+| `accounts` | 账号生命周期事件 | `upsertAccountStart` / `upsertAccountEnd` / `upsertAccountError` / `upsertStreakProtection` / `setAccountTasks` / `markAccountInterrupted` / `markAccountCompletedWithoutResult` |
+| `account_history` | **只有两个事件**：`account-end`（`store.js:668`）和 `account-balance-read`（`store.js:978`） | `insertHistory`（`INSERT OR IGNORE`，靠秒级唯一索引去重，重放不会重复） |
+| `activity` | 每个事件都经 `_pushActivity` → `insertActivity` | 裁剪走 `countActivity` / `pruneActivity` / `pruneGenericActivity` |
+| `runs` | 运行级事件 | `insertRunStart` / `closeRunFull` / `insertOrphanRunEnd` |
+| `meta` | 杂项键值 | `_writeMeta` |
+
+注意 `account-balance-read` 只写一条余额快照（`points=N`、`gained=null`），
+**不碰 status、也不触发收尾** —— 读一条余额不等于跑完一次（`store.js:972-985`）。
+所以 `account_history` 里 `gained` 为 NULL 的行是余额快照，不是一次完成。
+
+**② `/api/summary` 的字段形状**（`server.js:522`）
+
+```json
+{
+  "status":   { ... currentState()，见 server.js:175 ... },
+  "accounts": [ ...store.snapshotAccounts()：**store 原始行**，见下表 ... ],
+  "runs":     [ ...store.snapshotRuns(30) ... ],
+  "activity": [ ...store.snapshotActivity(120) ... ]
+}
+```
+
+- `runs[]`：`id, status, startTs, endTs, version, totalAccounts, clusters, accountsProcessed,
+  totalGained, oldTotal, newTotal, runtimeMin, exitCode, exitSignal`
+- `activity[]`：`ts, level, title, kind, userName, platform, email, message, raw`
+- `status`（`currentState()`）：`reachable, authRequired, authOk, lastError, checkedAt, displayName,
+  timezone, controlApiUrl, name, version, uptimeSec, bot, botState, botRunning, schedule,
+  remoteSchedule, remoteScheduleSupported, stream, lastEventAt, pendingDelay, codes`
+- **`accounts` 是 store 原始行**（`allAccounts` 的 SELECT 别名，`store.js:336`）：
+  `email, userName, geoLocale, status, lastStartAt, lastEndAt, lastGained, lastPoints,
+  lastDurationSec, lastError, streakProtection*, totalTasks, completedTasks`
+  —— **不含**控制 API 的配置字段（`index/langCode/hasTotp/proxy/...`）。
+
+**③ `/api/accounts` 的字段形状**（`server.js:531`）
+
+```json
+{
+  "accounts":    [ ...mergeAccounts(...) → buildRow() 展开，见下 ... ],
+  "histories":   { "<email>": [ { "ts": "...", "points": 855, "gained": 5, "durationSec": 42 } ] },
+  "historyDays": 365,
+  "apiError":    null,
+  "failures":    { "failed": 1, "buckets": [ ... ], "unclassified": [ ... ] }
+}
+```
+
+- `accounts[]` 的**权威清单是 `lib/accounts.js` 的 `buildRow()`**（不是 store 的 SELECT），分四组：
+  身份（`key/email/index/configured/observed`）、配置（`geoLocale/langCode/hasTotp/
+  hasRecoveryEmail/proxy`）、控制 API 内存统计（`apiRuns/apiTotalCollected/successStreak/
+  apiLastRunAt/apiLastCollected/apiLastSuccess`）、面板自己观察到的（`status/userName/
+  lastStartAt/lastEndAt/lastGained/lastPoints/lastDurationSec/lastError/streak*/totalTasks/
+  completedTasks`），外加运行中的实时值（`liveGained/liveBalance/liveBySource/earnable/
+  lastActivityAt`）和 `historyCount`。
+  **API 那三个数是 null 不是 0** —— 拿不到就是"不知道"，前端三处消费方都加了 null 守卫。
+- **`buildRow()` 是白名单**：store 里新增的列**不会**自动出现在 `/api/accounts` 里，
+  必须在这个函数里显式写一行。同一个字段在 ② 和 ③ 里的可见性**可能不同** ——
+  例如 `totalTasks`/`completedTasks` 在 ② 里有、在 ③ 里曾经没有（见 41cf1db）。
+  别用 ② 的字段名去猜 ③。
+- `failures` 来自 `lib/failureReasons.js` 的 `summarize()`（`server.js:572` 以 `summarizeFailures` 引入）：
+  `{ failed, buckets: [{ cause, action, count, examples: [{ email, error }] }], unclassified: [{ email, error }] }`。
+  判定表 `REASONS` **中英文都保留**：`cause`/`action` 是中文"人话"，`examples[].error` 是原始英文证据。
+
+**④ 时间窗口（热力图 / 累积条，别混在一起）**
+
+- 前端要多少天由 `public/api.js:39` 决定：`accounts(historyDays = 365)`，**默认 365**。
+- `overview.js` / `accounts.js` / `diagnostics.js` / `runs.js` 都是**不传参**调用 → 拿 365 天；
+  只有 `schedule.js:357` 传 `0` → 服务端 `historyDays=0` → `since=null` → **一份历史都不取**
+  （调度页不需要）。
+- 服务端（`server.js:549-563`）把参数夹在 `0..3650`，**参数缺失时**用 365。
+- 热力图吃的是这份历史的按天分桶：`overview.js:223` → `U.bucketByDay(histories[email])`
+  （`public/util.js:198`），再按 `weekKey` 排成周列。**内容上限就是这 365 天。**
+- 累积条那个窗口是**另一个常量**：`charts.js:155` 的 `ACCUM_WINDOW_DAYS = 84`（约 12 周），
+  在 `buildAccumBarHtml` 里按 `todayKey − 84` 截断。**84 和 365 是两回事。**
+
+**⑤ 主题 `.ts` 怎么被浏览器加载 —— 服务端现场转译，没有构建步骤。**
+
+- `/themes/index.js` **每次请求现生成**（`lib/themeLoader.js` 的 `generateIndexModule()`，
+  `Cache-Control: no-store`）：扫 `public/themes/` 下所有 `*Theme.ts`（排除 `types.ts` 和 `index.ts`），
+  默认主题排最前、其余按字母序，拼出 `import` 并导出 `themes` 数组。
+  **新增一个主题文件不需要重启、也不用改 index。**
+- `/themes/<名>.ts` 由 `lib/tsLite.js` 的 `transformThemeModule()` 现场转译后以
+  `text/javascript` 发出（`server.js:490-507`），路径穿越用 `startsWith(THEMES_DIR)` 挡（403）。
+- **转译边界（重点：超出就不 work）** 只处理五种写法 —— `import type {...}` 整行、
+  `export interface X {...}`（花括号配平，所以嵌套的对象类型不会被单括号正则截断）、
+  `export type X = ...` 整行、`export const NAME: TypeName =` 上的类型标注、
+  以及相对导入补 `.ts`。
+  **枚举、装饰器、`as` 断言、函数泛型、非 type 的 import、JSX 都不在范围内** ——
+  它们会让模块直接语法报错。所以主题文件只能是"数据字面量 + 类型标注"。
+
+**⑥ `sw.js` 的缓存策略 —— 分四种情况，同源静态是 network-first。**
+
+| 情况 | 策略 |
+|---|---|
+| 导航请求（`mode === 'navigate'`） | network-first，失败回落 `/index.html` |
+| 同源 `/api/*` | network，失败回落 `/index.html` |
+| 跨域（CDN 的 chart.js） | **cache-first**（版本固定，回源只会更慢，CDN 抽风时更脆） |
+| 同源静态资源 | **network-first**：先问网络，200 就顺手更新缓存；失败才回落缓存 |
+
+- 缓存名 `rewards-dashboard-pwa-v7`；install 时 `skipWaiting()` + 预缓存 7 个 ASSETS；
+  activate 时删掉所有旧缓存名 + `clients.claim()`。
+- 同源静态是 network-first，**所以改前端不需要硬刷新**（以前是 cache-first，才必须 Ctrl+F5）；
+  只有改 `sw.js` 的 `CACHE_NAME` 或 ASSETS 清单时才需要提版本号。
+- **一个尖角**：`/api/*` 失败时回落的是 `/index.html` —— 离线时一次 API 调用会拿回 HTML，
+  调用方 `r.json()` 会抛，而报错指向 JSON 解析、不指向网络。这是有意取舍（至少页面能打开），
+  但排查时要知道。
+- 另外 `API_LOG_BUFFER`（控制 API 侧）默认 **2000 行**（`scripts/api/processManager.js:24`、
+  `server.js:123`，可用 `API_LOG_BUFFER` 调）。面板启动时向 SSE 要 `LOG_REPLAY`（默认 20000）行，
+  但上游只留得住 2000 —— **所以面板重启只能靠回放补上缓冲区尾部覆盖到的那几个账号**，
+  不是全部。
+
+### 7.2 仍未核实（这些别当事实用）
+
+1. **面板那两格在浏览器里的实际显示。** 值已经确认能到达 `/api/accounts`
+   （36 个字段、含 `totalTasks`），但**页面上的渲染我没有看过** —— 需要人眼或截图确认。
+2. **`81e7d48` 那处登录改动** —— 只在"点击报失败、但挑战确实出现"时才触发，
+   到 2026-10-13 为止**一次都没被真实触发过**。
+3. **`activity` 表的裁剪阈值数值** —— 知道有 `MAX_ACTIVITY_ROWS` / `MAX_GENERIC_ROWS`
+   两个上限和对应的 `prune*` 语句，但没读这两个常量的具体数字。
+4. **`/api/summary` 的 `accounts` / `runs` / `activity` 三个字段前端是否都在用** ——
+   `overview.js:575-578` 同时取了 `summary` 和 `accounts` 两个接口，值得确认有没有重复取数。
 
 ---
 
@@ -312,7 +435,7 @@ cached("accounts", ctx.api.accounts, 5000),   // → /api/accounts
 | 用浏览器本地日期（`getDay` / `setDate` / `toLocaleDateString`）算日期键 | 浏览器不在 +8 时热力图整张网格偏一格 |
 | 窄屏隐藏规则改成整块 `display:none` | 统计带被一起藏掉（只该藏 `.accum-track`） |
 
-改完必须：**硬刷新** → `node tools/check-frontend.mjs`（有 ❌ 先修）→ F12 无红字 →
+改完必须：**刷新页面**（`F5` 就够，见 7.1⑥）→ `node tools/check-frontend.mjs`（有 ❌ 先修）→ F12 无红字 →
 把「时间线 ↔ 热力图」「账号删除二次确认」「配置页保存」这几条交互各点一遍。
 
 ## 9. 给设计者的最短上手路径
@@ -321,6 +444,6 @@ cached("accounts", ctx.api.accounts, 5000),   // → /api/accounts
 2. 打开 `public/index.html` 的结构，读 `public/app.js` 的路由，找到视图挂载点。
 3. 要改哪一页，就只改 `public/views/<那一页>.js` + `public/style.css` + `public/zh-cn.js`。
 4. 数字不够用，就按第 6 节的五层顺序往上加，别跳过 `lib/parser.js` 和 `lib/store.js`。
-5. **每次改完强刷**（`sw.js` 会缓存）。
+5. **每次改完刷新一遍**（同源静态是 network-first，普通刷新即生效；见 7.1⑥）。
 6. **跑一次 `node tools/check-frontend.mjs`** —— 静态拦住第 8 节里那两类只在运行时
    才炸、且会被 catch 吞掉的错误。它不做构建，只读文件，几秒钟。

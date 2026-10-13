@@ -106,9 +106,13 @@ U.fmtNumber(a.completedTasks)                                        // ✗ 会�
 
 数字一律经 `U.fmtNumber` / `U.fmtSigned`，保证千分位和正负号一致。
 
-### 2.7 服务工人缓存
+### 2.7 服务工人（service worker）缓存
 
-`public/sw.js` 有缓存。**改完前端要硬刷新（Ctrl+Shift+R）**；改了 `sw.js` 自身要提版本号。
+`public/sw.js` 分四种情况，**同源静态资源是 network-first**：先问网络，成功就顺手更新缓存，
+失败才回落缓存。所以**改完前端按 F5 刷新就够，不需要硬刷新**（以前是 cache-first，才必须 Ctrl+F5）。
+
+跨域的 CDN 资源（chart.js）是 **cache-first** —— 它的版本固定在 `sw.js` 的 `ASSETS` 清单里，
+不跟着你的改动变。只有**改动 `sw.js` 自己的 `CACHE_NAME` 或 `ASSETS` 清单**时，才需要提版本号。
 
 ## 3. 改 `index.html` 结构时要看的
 
@@ -129,7 +133,7 @@ U.fmtNumber(a.completedTasks)                                        // ✗ 会�
 
 ## 5. 每次改完的验收流程
 
-1. **硬刷新**（`Ctrl+Shift+R`）
+1. **刷新页面**（`F5` 就够；`sw.js` 对同源静态是 network-first，见 2.7）
 2. 跑检查器（在 `rewards-dashboard/` 下）：
 
    ```powershell
