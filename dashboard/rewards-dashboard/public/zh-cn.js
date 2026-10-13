@@ -296,7 +296,9 @@ const EXACT = {
   "Mobile search": "移动端搜索",
   "Claim bonus points": "领取奖励积分",
   "Activate search perk": "激活搜索加成",
-  "Visual search": "可视化搜索",
+  // "Visual search" 只在本文件靠前的「奖励类型」那一组里定义一次。重复定义时后者
+  // 会静默覆盖前者（值相同就看不出来，改了其中一条才会发现没生效）。
+  // tools/check-frontend.mjs 的 [3] 会拦这个。
   "Complete daily set": "完成每日任务",
   'Complete "more activities"': '完成“更多活动”',
   "Complete daily check-in": "完成每日签到",

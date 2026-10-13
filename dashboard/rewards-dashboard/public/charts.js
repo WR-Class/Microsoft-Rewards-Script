@@ -1,4 +1,4 @@
-import { escapeAttr, escapeHtml, fmtNumber, fmtSigned, localDateLabel, tzDayKey } from "./util.js";
+import { escapeAttr, escapeHtml, fmtNumber, fmtSigned, keyAddDays, keyDayOfWeek, localDateLabel, tzDayKey } from "./util.js";
 
 const PAD = { left: 46, right: 14, top: 14, bottom: 26 };
 
@@ -199,12 +199,8 @@ export function buildHeatmapHtml(days) {
   // 起点是**浏览器本地**的，浏览器不在 +8 时本地正午 12:00 在面板 TZ 里已经是第二天，
   // 整张网格偏一格；而且月份标签走浏览器本地、格子走面板 TZ，同一个网格里两个时区，
   // 月份标题会和它下面的格子对不上。
-  const keyAddDays = (key, n) => {
-    const d = new Date(key + "T00:00:00Z");
-    d.setUTCDate(d.getUTCDate() + n);
-    return d.toISOString().slice(0, 10);
-  };
-  const keyDayOfWeek = (key) => new Date(key + "T00:00:00Z").getUTCDay(); // 0=周日 .. 6=周六
+  // keyAddDays / keyDayOfWeek 来自 util.js —— runs.js 的日期游标也要用同一套键运算，
+  // 放在 util 里共用，避免两处各写一份、其中一处再退回本地日历。
 
   let startKey = days[0].dayKey;
 
@@ -309,11 +305,11 @@ export function buildHeatmapHtml(days) {
 export function buildAccumBarHtml(days, globalMaxGained, maxDays = null) {
   // 用与数据分桶同一个「时区感知」的日期键。原来这里用 toISOString()（UTC），
   // 本地 00:00 到 08:00 之间会得到昨天：窗口会多切掉一天、"今天"的柱子也不高亮。
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - ACCUM_WINDOW_DAYS);
-  const cutoffKey = tzDayKey(cutoff);
-
+  // 换掉之后还留着第二个毛病：cutoff 的**加减**走 setDate/getDate（浏览器本地日历），
+  // 只有最后一步 tzDayKey 是时区感知的 —— 浏览器不在 +8 时切点照样偏一天。
+  // 现在两步都在键上做：先取面板 TZ 的今天，再纯 UTC 往前推 N 天。
   const todayKey = tzDayKey(new Date());
+  const cutoffKey = keyAddDays(todayKey, -ACCUM_WINDOW_DAYS);
 
   let windowed = days.filter((d) => d.dayKey >= cutoffKey);
   if (maxDays != null) windowed = windowed.slice(-maxDays);

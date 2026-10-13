@@ -145,6 +145,21 @@ export function tzStamp(instant = new Date()) {
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}-${get("hour")}${get("minute")}${get("second")}`;
 }
 
+// 日期键运算：在 "YYYY-MM-DD" 字符串上直接加减，全程走 UTC，不碰浏览器本地日历。
+// 这两个是**唯一**应该用来做日期加减的方式。用 new Date(key + "T12:00:00") 或
+// setDate(getDate() ± n) 会走本地日历 —— 面板 TZ 是 Asia/Shanghai、历史 ts 是 UTC，
+// 浏览器不在 +8 时整列日期键会偏移一天。实测：UTC-4 的浏览器上本地正午
+// = 上海次日 00:00，tzDayKey 于是把它算成第二天。
+export function keyAddDays(key, n) {
+  const d = new Date(key + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+export function keyDayOfWeek(key) {
+  return new Date(key + "T00:00:00Z").getUTCDay(); // 0=周日 .. 6=周六
+}
+
 export function isoWeekStartKey(year, month, day) {
   const date = new Date(Date.UTC(year, month - 1, day));
   const dow = (date.getUTCDay() + 6) % 7; // Mon=0..Sun=6
