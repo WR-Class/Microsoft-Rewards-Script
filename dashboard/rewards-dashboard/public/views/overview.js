@@ -320,10 +320,14 @@ function renderAccountRows(root) {
 
       // 这一行左侧原本只放一个小条形图，占着 1fr 的全宽却大片留白。
       // 把四个数字放进同一个格子：总积分 / 今日获得 / 总任务 / 已完成。
-      // 前两个数据本来就在 payload 里（shownPoints 见 L293，todayGained 见 L258）；
-      // 后两个还没有来源 —— 日志里是 [REACT-PARSE] 任务列表 | 父任务=N | 未完成=N，
-      // 但面板的 lib/parser.js 目前只分类不抽数，所以先留占位，等解析层补上就自动显示。
-      const tasksTitle = "Not collected yet";
+      // 四个数现在都有真实来源：shownPoints 见 L293，todayGained 见 L258；
+      // 后两个是 a.totalTasks / a.completedTasks —— 来自 /api/accounts 的 accounts[]，
+      // 由 lib/accounts.js 的 buildRow() 从 store 的 accounts 表带出来（它是个白名单，
+      // 新增列必须在 buildRow 里显式写出，否则前端拿到的是 undefined，格子显示 "–"）。
+      //
+      // 口径（别读成"账号一共有几个任务"）：总数 = 最后一次解析到的那个任务块里有几项
+      // （实测 1~5）；已完成 = 总数 − 可上报，含被锁定/被禁用的项，所以会略微高估。
+      const tasksTitle = "总数 = 最后一次解析到的任务块（实测 1~5），不是账号的任务总数；已完成 = 总数 − 可上报，含被锁定/被禁用，会略微高估";
       const statStrip = `<div class="hero-stat-strip">
             <div class="hero-stat">
                 <span class="hero-stat-num">${shownPoints != null ? U.fmtNumber(shownPoints) : "\u2013"}</span>

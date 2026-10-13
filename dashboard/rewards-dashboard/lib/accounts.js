@@ -111,6 +111,14 @@ function buildRow({ config, local, histories, live = null }) {
     earnable: live ? (live.earnable ?? null) : null,
     lastActivityAt: live && live.live ? (live.live.lastUpdateTs ?? null) : null,
 
+    // 任务块（"总任务 / 已完成"两格的数据源）。store 里按 user_name 关联写入
+    // （见 store.js 的 setAccountTasks 注释：任务行的账号段是用户名，不是邮箱）。
+    // 必须在这里显式带出来 —— 这个函数是白名单，store 里的列不会自动出现在
+    // /api/accounts 的响应里；漏了这两行，前端 a.totalTasks 永远是 undefined，
+    // 界面上那两格就永远显示 "–"，而日志和数据库里其实都有值。
+    totalTasks: local ? local.totalTasks : null,
+    completedTasks: local ? local.completedTasks : null,
+
     historyCount: history.length,
   };
 }
