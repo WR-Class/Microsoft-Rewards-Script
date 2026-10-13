@@ -456,6 +456,8 @@ cached("accounts", ctx.api.accounts, 5000),   // → /api/accounts
    `Account editing: enabled -> ...` 这两行才对。**改了 `lib/` 必须重启面板**；
    只改 `public/` 下的前端文件不用重启（同源静态是 network-first，见 7.1⑥）。
 2. 打开 `public/index.html` 的结构，读 `public/app.js` 的路由，找到视图挂载点。
+   要知道「照着什么设计」（设计令牌、断点、DOM 契约、主题格式、组件清单），
+   看 `designer-handbook.md` —— 本份讲接线，那份讲设计面。
 3. 要改哪一页，就只改 `public/views/<那一页>.js` + `public/style.css` + `public/zh-cn.js`。
 4. 数字不够用，就按第 6 节的六层顺序往上加，别跳过 `lib/parser.js`、`lib/store.js`，
    和 `lib/accounts.js` 的 `buildRow()`（白名单，最容易漏的一层）。
