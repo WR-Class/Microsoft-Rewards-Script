@@ -90,6 +90,7 @@ const RUN_END_RE =
 // 所以这里用独立正则把注解再取一次。
 // 实测：库里有 8 行 new_total=0，其中 runs 表 2026-10-12T00:20Z 那条对应的日志行写着
 // 「现余额=0（另有 9 个账号余额未知，未计入）」—— 9/10 未知的部分和被当成"现余额 0"显示。
+// 回归测试：node tools/test-parser-runend.mjs（加 --logs 会把 logs/ 里全部 RUN-END 行重扫一遍）。
 const PARTIAL_BASELINE_RE = /（另有 (\d+) 个账号基线未知，未计入）/;
 const PARTIAL_BALANCE_RE = /（另有 (\d+) 个账号余额未知，未计入）/;
 function isPartialSum(re, message) {
