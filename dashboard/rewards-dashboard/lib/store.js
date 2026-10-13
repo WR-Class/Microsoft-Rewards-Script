@@ -255,7 +255,7 @@ class Store {
       ["streak_protection_remaining_days", "INTEGER"],
       ["streak_counter", "INTEGER"],
       ["streak_protection_updated_at", "TEXT"],
-      // 任务列表：父任务总数与已完成数（见 apply 的 case "task-list"）
+      // 任务子项：总数与已完成数（见 apply 的 case "task-progress"）
       ["total_tasks", "INTEGER"],
       ["completed_tasks", "INTEGER"],
     ];
@@ -930,10 +930,13 @@ class Store {
         this._pushActivity(event);
         break;
       }
-      case "task-list": {
-        // bot 每轮解析任务列表后发"任务列表 | 父任务=N | 未完成=M"（src/browser/
-        // ReactFunc.ts:788）。父任务是总数，完成数 = 总数 - 未完成。面板 overview.js
-        // 的"总任务/已完成"两格读的就是这两个字段。
+      case "task-progress": {
+        // bot 解析任务子项后发"已解析任务子项 | 总数=N | 可上报=M"（src/browser/
+        // ReactFunc.ts）。可上报 = 未完成且未锁定未禁用，所以完成数 = 总数 - 可上报。
+        // 面板 overview.js 的"总任务/已完成"两格读的就是这两个字段。
+        // 不用"任务列表 | 父任务=N | 未完成=M"那条：它的 complete 依赖抓取片段里出现
+        // "2 / 3 tasks" 进度文本，实测 4 天 135 行一次都没匹配到，未完成恒等于父任务、
+        // 完成数恒为 0。这条才有信号（196 行里 63 行 可上报 < 总数）。
         // 按 user_name 关联 —— 这条行的账号段是用户名而不是邮箱（见 setAccountTasks）。
         // 不写 activity：它每轮都重发，进活动表只会挤掉真正需要留的行。
         if (event.userName && event.total != null) {

@@ -37,12 +37,20 @@ const ACCOUNT_END_RE =
 // 事件数为 0，account_history 从 10-11 起再没写进新行，而 accounts 表靠清理
 // 路径照常更新 —— 面板于是显示"成功 + 今天没有运行"。所以这不是文案问题，
 // 是整个结束事件消失了。括号里的话用 [^）]* 放宽，别把措辞钉死。
-// bot: src/browser/ReactFunc.ts:788 —— 每次解析任务列表后发一条
-//   任务列表 | 父任务=42 | 未完成=7
-// 父任务是总数，完成数 = 父任务 - 未完成。面板 overview.js 早就在渲染
-// a.totalTasks / a.completedTasks（空值显示 –），但从来没有人赋值 —— 这两个数
-// 一直是空的。这条规则就是补上那一端。
-const TASK_LIST_RE = /^任务列表\s*\|\s*父任务=(\d+)\s*\|\s*未完成=(\d+)\s*$/;
+// bot: src/browser/ReactFunc.ts —— 解析任务子项后发一条
+//   已解析任务子项 | 总数=3 | 可上报=1
+// 可上报 = 未完成且未锁定未禁用（上游 reportable = !!hash && !isCompleted && !isLocked
+// && !isDisabled，L718），所以 已完成 = 总数 - 可上报。
+//
+// 为什么不用"任务列表 | 父任务=N | 未完成=M"那条：它的 complete 依赖抓取片段里出现
+// "2 / 3 tasks" 形式的进度文本（ReactFunc.ts:771-772）。实测 4 天 135 行、10 个账号，
+// 一次都没匹配到 —— 未完成恒等于父任务，完成数恒为 0。那条行的数字是死的。
+// 这条是活的：196 行里 133 行 可上报==总数、63 行 可上报<总数，且随着账号跑起来
+// 可上报单调减少（05:06 总38/可上报21 -> 11:26 总35/可上报13）。
+//
+// 两个数字必须来自同一行：父任务（MOBILE 2 / DESKTOP 3）与子项总数（1~5）粒度不同，
+// 跨行相减没有意义。
+const TASK_ITEMS_RE = /^已解析任务子项\s*\|\s*总数=(\d+)\s*\|\s*可上报=(\d+)\s*$/;
 const FLOW_POINTS_COLLECTED_RE =
   /^积分已收集（[^）]*）\s*\|\s*(?:currentBalance|现余额)=(-?\d+|null)\s*\|\s*(?:account|账户)=(\S+)$/;
 // English "email: message"; the fork logs "email | 错误=message".
@@ -313,16 +321,16 @@ function parseLine(rawLine) {
       break;
     }
     case "REACT-PARSE": {
-      const tasks = TASK_LIST_RE.exec(message);
-      if (tasks) {
-        const total = Number(tasks[1]);
-        const incomplete = Number(tasks[2]);
+      const sub = TASK_ITEMS_RE.exec(message);
+      if (sub) {
+        const total = Number(sub[1]);
+        const reportable = Number(sub[2]);
         return {
           ...base,
-          kind: "task-list",
+          kind: "task-progress",
           total,
-          incomplete,
-          completed: total - incomplete,
+          reportable,
+          completed: total - reportable,
         };
       }
       const protection = STREAK_PROTECTION_RE.exec(message);
