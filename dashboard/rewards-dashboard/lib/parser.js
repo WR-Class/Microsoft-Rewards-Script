@@ -84,6 +84,18 @@ const RUN_START_RE =
 // 数字本身也可能是 null。
 const RUN_END_RE =
   /^(?:Completed all accounts|全部账户完成)\s*\|\s*(?:accountsProcessed|处理账户数)=(\d+)\s*\|\s*(?:pointsGained|获得积分)=(-?\d+|null)(?:（[^）]*）)?\s*\|\s*(?:previousBalance|原余额)=(\d+|null)(?:（[^）]*）)?\s*\|\s*(?:currentBalance|现余额)=(\d+|null)(?:（[^）]*）)?\s*\|\s*(?:runtimeMinutes|运行分钟数)=([\d.]+)$/;
+// RUN-END 行里的「（另有 N 个账号基线未知，未计入）」/「（另有 N 个账号余额未知，未计入）」
+// 说明同一行里那个数字是**部分和**，不是总量。上面两个可选括注把注解吞掉了（它们必须非捕获，
+// 否则 am[3]/am[4]/am[5] 会整体平移 —— 同样的理由见 scripts/api/logParser.js 的 RUN-END 注释），
+// 所以这里用独立正则把注解再取一次。
+// 实测：库里有 8 行 new_total=0，其中 runs 表 2026-10-12T00:20Z 那条对应的日志行写着
+// 「现余额=0（另有 9 个账号余额未知，未计入）」—— 9/10 未知的部分和被当成"现余额 0"显示。
+const PARTIAL_BASELINE_RE = /（另有 (\d+) 个账号基线未知，未计入）/;
+const PARTIAL_BALANCE_RE = /（另有 (\d+) 个账号余额未知，未计入）/;
+function isPartialSum(re, message) {
+  const m = re.exec(message);
+  return !!(m && Number(m[1]) > 0);
+}
 // src/index.ts's waitBeforeNextAccount() - with accountDelay, accounts start
 // one at a time now rather than together, so this wait can be a large
 // fraction of the run's total time.
@@ -297,13 +309,20 @@ function parseLine(rawLine) {
     case "RUN-END": {
       const am = RUN_END_RE.exec(message);
       if (am) {
+        // 有账号被排除在合计之外时，这一行报的是部分和。留 null 而不是留数字：
+        // 宁可让界面显示 "–"（不知道），也不把一个把未知当 0 的偏低数当总量。
+        // 与 scripts/api/logParser.js 的 collected 用同一套判断。
+        const partialBaseline = isPartialSum(PARTIAL_BASELINE_RE, message);
+        const partialBalance = isPartialSum(PARTIAL_BALANCE_RE, message);
         return {
           ...base,
           kind: "run-end",
           accountsProcessed: Number(am[1]),
-          totalGained: numOrNull(am[2]),
-          oldTotal: numOrNull(am[3]),
-          newTotal: numOrNull(am[4]),
+          // 获得积分没有自己的注解：只要有任何账号被排除，差额就不可信。
+          totalGained:
+            partialBaseline || partialBalance ? null : numOrNull(am[2]),
+          oldTotal: partialBaseline ? null : numOrNull(am[3]),
+          newTotal: partialBalance ? null : numOrNull(am[4]),
           runtimeMin: Number(am[5]),
         };
       }
