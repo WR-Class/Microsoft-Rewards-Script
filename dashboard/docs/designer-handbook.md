@@ -8,7 +8,7 @@
 | **本手册** | 照着什么设计？有什么可用的？ | 设计时随手查 |
 
 本手册里每个数字都是从代码里数出来的，不是估的。数错了比没有更糟 —— 所以
-第 7 节把**三处已确认的不一致**单独列出来，不要当它们是笔误。
+第 7 节把**已知的不一致**单独列出来（7.1 已随 2026-10 重做修复），不要当它们是笔误。
 
 ---
 
@@ -16,8 +16,8 @@
 
 | 文件 | 规模 | 你在这里改什么 |
 |---|---|---|
-| `public/style.css` | 2708 行 | **所有样式**。这是你 90% 的时间所在 |
-| `public/views/<某一页>.js` | 227 ~ 1105 行 | 那一页的 HTML 结构（都是 JS 模板字符串） |
+| `public/style.css` | 972 行 | **所有样式**。这是你 90% 的时间所在 |
+| `public/views/<某一页>.js` | 255 ~ 1113 行 | 那一页的 HTML 结构（都是 JS 模板字符串） |
 | `public/zh-cn.js` | — | 新文案的中文（key = 英文原文） |
 
 **不要碰**：`index.html`（骨架 + 24 个 id 的归属）、`public/app.js`（路由）、
@@ -27,96 +27,91 @@
 
 ---
 
-## 1. 设计令牌：24 个，全在 `style.css:5-41` 的 `:root` 里
+## 1. 设计令牌：明暗两块，各 34 个名字
 
-**只用这些变量，不要写死颜色。** 写死的颜色在暗色模式和主题调色板下都不会变。
+**只用这些变量，不要写死颜色。** 写死的颜色在另一个模式下都不会变。
 
-### 1.1 基础色（13 个） —— 也是主题的 `light` 调色板
+结构（2026-10 重做后）：`:root`（= 暗色，冷蓝科技调）在 `style.css:12-38`，
+`[data-theme-mode="light"]`（暖奶油调）在 `L39-63`，两块名字一一对应；
+外加 `L64-66` 一个与模式无关的派生渐变 `--grad`。暗色是默认，不是媒体查询。
 
-| 令牌 | 值（亮色） | 用途 | 被引次数 |
+### 1.1 新名（25 个） —— 新代码用这些
+
+| 令牌 | 暗色 | 浅色 | 用途 |
 |---|---|---|---|
-| `--canvas` | `#ffffff` | 页面底色 | 4 |
-| `--surface` | `#fafbfb` | 卡片、抬升面（**用得最多**） | 21 |
-| `--surface-alt` | `#f6f7f8` | 次级面：表单字段、代码块 | 15 |
-| `--hover` | `#e8ebed` | 交互悬停的底色 | 12 |
-| `--text` | `#24292d` | 正文 | 26 |
-| `--text-muted` | `#434a51` | 次要文字、说明、标签 | 44 |
-| `--text-inverse` | `#ffffff` | **强调色背景上的**文字 | 5 |
-| `--border` | `#d7dcdf` | 常规描边 | 43 |
-| `--border-strong` | `#b6bec3` | 需要更明显的描边 | 3 |
-| `--accent` | `#3882c2` | 主强调色：链接、主按钮、选中 | 29 |
-| `--accent-hover` | `#1f639e` | 强调色的悬停/按下态 | 7 |
-| `--accent-subtle` | `#e0e7f1` | 选中态的淡背景 | 2 |
-| `--focus` | `#65a4d7` | 键盘焦点环 | 1 |
+| `--bg` | `#0B0F16` | `#FAF5EE` | 页面底色 |
+| `--bg2` | `#0E131C` | `#F3EBE0` | 次级页面底 |
+| `--card` | `#141B28` | `#FFFFFF` | 卡片面 |
+| `--card2` | `#1A2334` | `#F7F0E7` | 卡片内次级面 |
+| `--soft` | `#111826` | `#FAF4EC` | 软面（内嵌块） |
+| `--border` | `#233046` | `#EADFD0` | 常规描边 |
+| `--border2` | `#33445F` | `#D9C9B4` | 强描边 |
+| `--text` | `#E8EEF7` | `#291E12` | 正文 |
+| `--dim` | `#9FAEC4` | `#756555` | 次要文字 |
+| `--faint` | `#6B7A93` | `#A2917E` | 最弱文字、说明 |
+| `--acc` | `#38BDF8` | `#C2410C` | 主强调色 |
+| `--acc2` | `#818CF8` | `#F59E0B` | 次强调、渐变尾色 |
+| `--accsoft` | rgba .14 | rgba .11 | 强调淡底 |
+| `--ok` / `--oksoft` | `#34D399` | `#15803D` | 成功 + 淡底 |
+| `--bad` / `--badsoft` | `#F87171` | `#DC2626` | 错误/危险 + 淡底 |
+| `--warn` / `--warnsoft` | `#FBBF24` | `#A16207` | 警告 + 淡底 |
+| `--vio` / `--viosoft` | `#A78BFA` | `#9333EA` | 紫（特殊标记） + 淡底 |
+| `--shadow` | 深色投影 | 暖色浅投影 | 卡片阴影 |
+| `--hi` | inset 高光 | inset 高光 | 卡片顶边高光 |
+| `--dot` | rgba 点 | rgba 点 | 背景点纹 |
+| `--glass` | rgba .78 | rgba .82 | 玻璃拟态底 |
 
-### 1.2 语义色（4 个）
+### 1.2 兼容旧名（9 个） —— 别名，**新样式别用**
 
-| 令牌 | 值（亮色） | 用途 | 被引次数 |
-|---|---|---|---|
-| `--positive` | `#5f7556` | 收益、成功 | 8 |
-| `--negative` | `#e67c7c` | 支出、危险、错误 | 17 |
-| `--warning` | `#7D4E00` | 警告（**见 7.1，这个值和主题不一致**） | 1 |
-| `--energy-high-accent` | `#9664d0` | 高能耗强调（总览的能耗条） | 3 |
+给 `charts.js` 内联样式和 themeManager 注入前的兜底，全部指向新名：
+`--text-muted→--faint`、`--surface→--card`、`--surface-alt→--card2`、
+`--border-strong→--border2`、`--positive→--ok`、`--negative→--bad`、
+`--warning→--warn`、`--accent→--acc`、`--accent-subtle→--accsoft`。
 
-### 1.3 布局（3 个）
+### 1.3 派生（1 个）
 
-| 令牌 | 值 | 用途 | 被引次数 |
-|---|---|---|---|
-| `--radius` | `12px` | **全局圆角就这一个值**，改它等于全站改圆角 | 4 |
-| `--shadow` | `0 1px 2px rgba(20, 22, 30, 0.06), 0 1px 1px rgba(20, 22, 30, 0.04)` | 卡片阴影 | 4 |
-| `--mono` | `ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace` | 等宽文字：日志、cron、配置编辑器 | 7 |
+`--grad`：`135°`，从 `var(--accent, var(--acc))` 到 `var(--energy-high-accent, var(--acc2))`
+—— themeManager 注入后自动跟主题走；主按钮、进度条在用。
 
-### 1.4 派生色（4 个） —— **不要改，它们是从上面算出来的**
+**合计 397 次 `var()` 引用** —— 全站样式全靠这两块令牌撑着。
 
-| 令牌 | 值 | 用途 | 被引次数 |
-|---|---|---|---|
-| `--positive-bg` | `color-mix(in srgb, var(--positive) 16%, var(--surface))` | 收益的淡底 | 5 |
-| `--negative-bg` | `color-mix(in srgb, var(--negative) 16%, var(--surface))` | 支出的淡底 | 6 |
-| `--amber` | `var(--warning)` | 警告色的别名 | 16 |
-| `--amber-bg` | `color-mix(in srgb, var(--amber) 14%, var(--surface))` | 警告的淡底 | 8 |
+### 1.5 themeManager 注入的 18 个（全是旧名，不含 `--shadow`）
 
-想换警告色就改 `--warning`，`--amber` 和 `--amber-bg` 会自动跟着变。
+`themeManager.js` 的 `TOKEN_TO_CSS_VAR` 把 palette 的 18 个键写成同名 CSS 变量：
+`--canvas` `--surface` `--surface-alt` `--hover` `--text` `--text-muted` `--text-inverse`
+`--border` `--border-strong` `--accent` `--accent-hover` `--accent-subtle` `--focus`
++ `--positive` `--negative` `--warning` + `--energy-high-accent` `--energy-high-bg`。
+**没有 `--shadow`**（`types.ts` 的 `ThemePalette` 里也没有 shadow 键）。
 
-**合计 291 次 `var()` 引用** —— 也就是说全站样式全靠这 24 个值撑着。改一个令牌的影响面
-基本等于"全站"。
-
-### 1.5 主题会覆盖其中 18 个
-
-被主题覆盖（见第 4 节）：1.1 的 13 个 + `--positive` `--negative` `--warning`
-`--energy-high-accent` + `--shadow`。**共 18 个。**
-
-**只由 `:root` 决定、主题动不了的 6 个**：`--radius`、`--mono`、`--positive-bg`、
-`--negative-bg`、`--amber`、`--amber-bg`。
+机制是双轨：明暗两块由 `data-theme-mode` 切换；themeManager 再把 palette 值内联注入
+这些旧名变量。与新名撞车的只有 `--text` 和 `--border` 两个 —— 两边取值刻意保持一致
+（`style.css` 头注释），覆盖也无感。
 
 ---
 
-## 2. 响应式：8 个条件，20 个媒体查询块
+## 2. 响应式：4 个宽度断点 + 1 个动效偏好，共 5 块
 
-`style.css` 里 `@media` 一共 **20 块**，分布在 **8 种条件**上。
+`style.css` 里 `@media` 一共 **5 块**。
 
-| 条件 | 块数 | 它改什么 |
+| 条件 | 位置 | 它改什么 |
 |---|---|---|
-| `(max-width: 768px)` | **10** | 主移动断点：顶栏折行、标签栏、控制条、统计卡改单列、英雄面板、日志框、账号行、开关网格、ticker、运行进度 |
-| `(max-width: 420px)` | 3 | 小屏细节：登录码字号、英雄面板积分列、日志标签/时间/正文 |
-| `(pointer: coarse)` | 2 | 触屏：`link-btn`/`btn`/`btn-small`/图标按钮/主题选择/登录码卡片 → **加大点击目标** |
-| `(prefers-color-scheme: dark)` | 1 | `:root` 的 18 个令牌换成暗色值 |
-| `(prefers-reduced-motion: reduce)` | 1 | `*` 关掉动画和过渡 |
-| `(max-width: 1024px)` | 1 | `.stat-grid` 列数 |
-| `(min-width: 769px) and (max-width: 1024px)` | 1 | 平板：英雄面板积分列 |
-| `(max-width: 600px)` | 1 | 登录码列表和卡片 |
+| `(max-width: 1100px)` | `L645`（第 9 段内） | 账户详情分组收为单列 |
+| `(max-width: 1000px)` | `L912` | stat-grid 3 列、表单网格 2 列 |
+| `(max-width: 760px)` | `L916` | 主移动断点：控制条折行、标签栏横滚、hero 侧栏转横向、卡片内边距收紧 |
+| `(max-width: 560px)` | `L930` | stat-grid 2 列、表单 1 列、日志终端 300px、表格 260px、隐藏日志 tag |
+| `(prefers-reduced-motion: reduce)` | `L939` | `*` 关掉所有动画和过渡 |
 
 ### 2.1 三条你必须知道的规则
 
-**① 全部 `@media` 都在第六段（`style.css:2294-2708`，见第 6 节）。**
-文件是「令牌 → 全局/重置 → 应用外壳 → 共享组件 → 各页 → 响应式」六段。所以你在 L1200
-给某个元素写的样式，可能被 L2600 的同名规则盖掉。**改窄屏表现，去第六段找，不要在组件那一节加。**
+**① 宽度断点集中在第 18 段（`L911-942`），只有一条例外。**
+`(max-width: 1100px)` 那条在第 9 段（`L645`），跟着账户详情的样式走。改窄屏表现
+先在这两处找，不要在组件节里随手加。
 
-**② `padding` 别在 `max-width: 768px` 里重复实现一遍。**
-窄屏下组件容器的 padding 由 `style.css:2346` 的「Panel & table density (shared)」统一接管。
+**② 断点只有 1000 / 760 / 560 三档（外加 1100 一条），别引入新档位。**
+新断点会和既有网格收列节奏打架；要调就调这三档里的规则。
 
-**③ 窄屏藏的是"趋势条形"，不是统计带。**
-`style.css:2514` 只隐藏 `.hero-bar-cell .accum-track`（那排小条形图），
-`.hero-bar-cell` 里的**数字要保留**。早先那条规则是整块 `display:none`，会把数字一起藏掉。
+**③ `prefers-reduced-motion` 会杀掉全部动画 —— 包括积分条入场、气泡过渡。**
+动效「不见了」先查系统/浏览器的减弱动效设置，别急着改代码。
 
 ---
 
@@ -128,7 +123,7 @@
 ### 3.1 `id` —— 24 个写在 `index.html` 里，其中 22 个被 JS 抓
 
 `U.$()` 找不到元素时**只返回 null**，紧接着赋值就抛 `Cannot read properties of null`。
-**实测 22 处 `U.$("#..")` 全部没有 null 守卫** —— 改一个就够把面板打挂。
+**实测全项目 152 处 `U.$(…)` 调用，带 `?.` 守卫的只有 3 处** —— 改一个就够把面板打挂。
 
 ```
 顶栏/状态   statusBadge  statusText  modeToggle  modeIcon  themeSelect
@@ -142,10 +137,10 @@
 另外两个不是 JS 抓的，但被引用，**同样不能改名**：`main`（跳转链接 `href="#main"`）、
 `login-codes-heading`（`aria-labelledby`）。
 
-**不止 `index.html`**：全项目共 **102 个 id** 被引用（JS 选择器 / CSS 的 id 选择器 /
-HTML 的 `href="#…"` 和 `aria-*`），其余由各视图模板自己生成 —— 改视图里的 HTML 一样会踩。
+**不止 `index.html`**：全项目共 **124 个 id** 被引用（JS 选择器 / CSS 的 id 选择器 /
+`href="#…"` / `aria-labelledby` 等 idref 属性），其余由各视图模板自己生成 —— 改视图里的 HTML 一样会踩。
 
-### 3.2 `data-*` —— JS 读 23 个
+### 3.2 `data-*` —— JS 读 24 个
 
 `data-tab`（标签切换）、`data-cron`（调度快捷按钮）、`data-path`（配置字段路径）、
 `data-target`（调度 local/remote）、`data-arm-delete` / `data-confirm-delete` /
@@ -188,14 +183,15 @@ export const consoleTheme: ThemeDefinition = {
 }
 ```
 
-`ThemePalette` 有 **25 个键**（`public/themes/types.ts`）：1.1 那 13 个、
-`positive`/`negative`/`warning`、以及 9 个 energy 键
+`ThemePalette` 有 **25 个键**（`public/themes/types.ts`）：13 个基础色键
+（`canvas`…`focus`，对应 1.2 的旧名变量）、`positive`/`negative`/`warning`、以及 9 个 energy 键
 （`energyLowBg/Accent/Text`、`energyMedium…`、`energyHigh…`）。
 
 ### 4.2 只有 18 个键真的会被应用
 
 `themeManager.js` 里的映射表把 palette 的键写成 CSS 变量，**只映射 18 个**：
-1.1 的 13 个 + `positive` `negative` `warning` + `energyHighAccent` + `energyHighBg`。
+13 个基础色键（`canvas`…`focus`，即 1.2 旧名那套）+ `positive` `negative` `warning` + `energyHighAccent` + `energyHighBg`。
+完整名单和双轨机制见 1.5。
 
 **剩下 7 个 energy 键（low/medium 各 3 个，加 `energyHighText`）定义了但没有效果** ——
 `types.ts` 里也写了 "silently ignored by budget themeManager"。
@@ -232,83 +228,92 @@ export const consoleTheme: ThemeDefinition = {
 
 ---
 
-## 5. 组件清单：7 页 + 29 个共享类
+## 5. 组件清单：7 页 + 46 个共享类
 
 ### 5.1 七个页面
 
-| 页面 | 视图文件 | 行数 | 自用 class | 定义的 id | 样式在 |
-|---|---|---|---|---|---|
-| 总览 | `views/overview.js` | 603 | 56 | 20 | `style.css:1111` |
-| 账号 | `views/accounts.js` | 797 | 41 | 15 | `style.css:1677` |
-| 配置 | `views/config.js` | 1105 | 37 | 12 | `style.css:2035` |
-| 运行记录 | `views/runs.js` | 227 | 27 | 8 | `style.css:1936` |
-| 诊断 | `views/diagnostics.js` | 249 | 26 | 6 | `style.css:2198` |
-| 调度 | `views/schedule.js` | 378 | 23 | 26 | `style.css:1987` |
-| 日志 | `views/logs.js` | 239 | 18 | 10 | `style.css:1847` |
+| 页面 | 视图文件 | 行数 | 样式在 |
+|---|---|---|---|
+| 总览 | `views/overview.js` | 630 | 第 7/8/9 段（`L374`/`L406`/`L442`） |
+| 账号 | `views/accounts.js` | 329 | 第 10 段（`L592`） |
+| 配置 | `views/config.js` | 1113 | 第 14 段（`L775`） |
+| 运行 | `views/runs.js` | 689 | 第 11 段（`L683`） |
+| 诊断 | `views/diagnostics.js` | 255 | 第 12 段（`L718`） |
+| 调度 | `views/schedule.js` | 387 | 第 13 段（`L753`） |
+| 日志 | `views/logs.js` | 322 | 第 15 段（`L833`） |
 
-**"样式在"那一列就是你要找的那一节。** 每页在 `style.css` 里都有独立的分节注释。
+**"样式在"那一列就是你要找的那一节。** 每页在 `style.css` 里都有独立的编号大段。
 
-### 5.2 共享词汇表：29 个类被两页以上用到
+### 5.2 共享词汇表：46 个类被两页以上用到
 
-**改这 29 个等于同时改多页。** 全是已定义的（都有 CSS 规则）。
+**改这 46 个等于同时改多页。** 数法：从 7 个视图文件的模板里提取静态 `class="…"`
+（插值部分忽略），按出现的页数归类 —— 口径写在这，下次审计照着重数。
 
 | 用到它的页数 | 类 |
 |---|---|
-| 7 页（全部） | `panel`、`panel-head`、`empty-note` |
-| 6 页 | `panel-sub` |
-| 5 页 | `btn`、`notice`、`notice--warn` |
-| 4 页 | `btn-primary`、`check`、`field`、`input` |
-| 3 页 | `btn-small`、`tag-mini`、`form-actions`、`seg`、`seg-btn--active` |
-| 2 页 | `kv`、`acc-detail-group`、`acc-detail-group-title`、`btn-danger`、`hint`、`form`、`field-grid`、`field-item`、`field-hint`、`exit-chevron`、`visually-hidden`、`chart-wrap`、`seg-btn` |
+| 7 页（全部） | `card`、`card-h`、`card-ic`、`card-title`、`card-tools` |
+| 6 页 | `card-b`、`card-sub`、`empty-note`、`btn` |
+| 5 页 | `btn-small` |
+| 4 页 | `notice`、`notice--warn`、`btn-primary`、`field`、`input`、`check` |
+| 3 页 | `av`、`acc-info`、`acc-mail`、`acc-sub`、`tag-mini`、`seg`、`seg-btn`、`btn-danger`、`form-actions` |
+| 2 页 | `visually-hidden`、`acc-lines`、`modal-mask`、`modal`、`modal-h`、`modal-x`、`chart-wrap`、`hint`、`form`、`field-grid`、`field-item`、`field-hint`、`acc-detail-group`、`acc-detail-group-title`、`exit-chevron`、`kv`、`seg-btn--active`、`batch`、`check--row`、`bad`、`vio`（pill 修饰） |
 
-另外 **129 个类只被一页用到**，动它们的影响面就是那一页。
+另外 **143 个类只被一页用到**，动它们的影响面就是那一页。
 
 ### 5.3 共享组件的样式位置
 
 | 组件 | 样式在 | 谁在用 |
 |---|---|---|
-| 面板/卡片容器 | `style.css:607` | 全部 7 页 |
-| 提示条 `notice` | `style.css:648` | 5 页 |
-| 按钮 `.btn` 家族 | `style.css:690` | 5 页 |
-| 表单与输入 `.field`/`.input` | `style.css:749` | 4 页 |
-| 分段控件 `.seg` | `style.css:838` | 3 页 |
-| 表格 | `style.css:875` | 总览、账号、运行记录 |
-| 空状态 `.empty-note` | `style.css:913` | 全部 7 页 |
-| 键值网格 `.kv` | `style.css:920` | 账号、调度 |
-| 进度条 | `style.css:946` | 总览 |
-| 内联 SVG 图表 | `style.css:963` | 总览、运行记录 |
-| 可展开列表项 | `style.css:1030` | 账号、诊断、运行记录 |
+| 卡片容器 `.card` | `style.css:245` | 全部 7 页 |
+| 提示条 `.notice` | `style.css:354` | 4 页 |
+| 空状态 `.empty-note` | `style.css:353` | 6 页 |
+| 按钮 `.btn` 家族 | `style.css:267` | 6 页 |
+| 输入 `.input` / 字段 `.field` | `style.css:309` / `:321` | 4 页 |
+| 分段控件 `.seg` | `style.css:325` | 3 页 |
+| 键值网格 `.kv` | `style.css:367` | 账号、总览（运行页账户详情） |
+| 图表容器 `.chart-wrap` | `style.css:562` | 总览、运行 |
+| 账户卡 `.acc-card` | `style.css:593` | 运行（账户列表） |
+| 可展开列表项 `.exit-item` | `style.css:700` | 运行 |
 
-改 `.btn` 之前想一下：5 个页面同时在用。
+改 `.btn` 之前想一下：6 个页面同时在用。
 
 ---
 
 ## 6. `style.css` 的地图
 
-2708 行，**六个编号大段**。文件里的编号注释（`1. TOKENS / VARIABLES` 这种）就是权威边界：
+972 行，**19 个编号大段**。文件里的编号注释（`/* ==== 7. OVERVIEW: STAT GRID ==== */`
+这种）就是权威边界：
 
 | 行范围 | 段 | 内容 |
 |---|---|---|
-| `2-44` | `1. TOKENS / VARIABLES` | `:root` 的 24 个令牌 + `color-scheme` |
-| `45-123` | `2. GLOBAL / RESET` | reset、`main` 布局、tab panel 容器 |
-| `124-514` | `3. APP SHELL` | 顶栏、标签栏、控制条、toast、登录提示、页脚 |
-| `515-1107` | `4. SHARED COMPONENTS` | 按钮、表单、表格、提示条、面板容器……（见 5.3） |
-| `1108-2293` | `5. PAGE-SPECIFIC SECTIONS` | 每页一节，按页面顺序（见 5.1） |
-| `2294-2708` | `6. RESPONSIVE` | **全部 20 个 `@media` 都在这一段** |
+| `11-67` | `1. TOKENS` | 明暗两块令牌（各 34 名）+ `--grad`（见第 1 节） |
+| `68-110` | `2. BASE` | reset、body、main 布局 |
+| `111-130` | `2.5 ICON MASKS` | 图标遮罩 |
+| `131-177` | `3. TOPBAR` | 顶栏、连接状态、明暗切换 |
+| `178-239` | `4. TABBAR + CONTROL STRIP` | 标签栏、控制条（开始/重启/停止） |
+| `240-265` | `5. LAYOUT & CARDS` | `.card` 容器体系（见 5.3） |
+| `266-373` | `6. BUTTONS / INPUTS / SEG / PILLS` | 按钮、表单、分段、胶囊、表格、kv（见 5.3） |
+| `374-405` | `7. OVERVIEW: STAT GRID` | 总览统计卡 |
+| `406-441` | `8. OVERVIEW: RUN PROGRESS` | 上次运行进度 |
+| `442-591` | `9. OVERVIEW: ACCOUNT ROWS / HERO` | 账户行、时间线、热力图、趋势弹窗（`1100px` 媒体查询也在这段，`L645`） |
+| `592-682` | `10. ACCOUNTS` | 账号管理卡、弹窗列表 |
+| `683-717` | `11. RUNS` | 运行页 |
+| `718-752` | `12. DIAGNOSTICS` | 诊断页 |
+| `753-774` | `13. SCHEDULE` | 调度页 |
+| `775-832` | `14. CONFIG` | 配置页 |
+| `833-862` | `15. LOGS` | 日志终端 |
+| `863-902` | `16. TOAST / TICKER / LOGIN CODES` | toast、滚动条、登录码 |
+| `903-910` | `17. FOOT` | 页脚 |
+| `911-942` | `18. RESPONSIVE` | 4 个 `@media` 块（见第 2 节） |
+| `943-972` | `19. MODAL` | 账号管理弹窗 |
 
-**顺序是有意义的**：后面的覆盖前面的。而且因为 `@media` 全在第六段，所以
-**第六段里的任何规则都能盖掉前面五段**。
+**顺序是有意义的**：同优先级时后面的覆盖前面的。暗色模式**不是**媒体查询 ——
+暗色就是 `:root` 默认值，浅色是第 1 段里 `[data-theme-mode="light"]` 的覆盖块。
 
-**一个容易搞错的地方**：暗色模式令牌（`L2297`）和全局共享组件的响应式部分（`L2322` 起）
-都在**第六段里**，不在它们名字听起来该在的段落 —— 因为暗色模式本身就是个媒体查询。
-
-窄屏（`max-width`）规则集中在 `L2467` 之后；`2294-2466` 那部分放的是
-`prefers-color-scheme`、`prefers-reduced-motion`、`pointer: coarse` 三类。
-
-六段内部另有 70 条分节注释（`/* Overview */`、`/* Buttons */` 这种），`grep` 一下就能定位：
+定位任一样式，`grep` 编号注释最快：
 
 ```powershell
-Select-String -Path public\style.css -Pattern '^\s*/\*\s*\S' -Encoding UTF8
+Select-String -Path public\style.css -Pattern '============' -Encoding UTF8
 ```
 
 ---
@@ -322,18 +327,12 @@ Select-String -Path public\style.css -Pattern '^\s*/\*\s*\S' -Encoding UTF8
 （`#A16207` / `#FBBF24`）与 `consoleTheme` 的 light/dark `warning` **完全一致** ——
 这条不再是漂移。主题加载前后都走同一组值。
 
-### 7.2 `--energy-high-bg` 被用，但 `:root` 里没有
+### 7.2 `--energy-high-bg`：从「用了没定义」变成「注入了没人用」
 
-```
-style.css:542   background: var(--energy-high-bg);
-style.css:1250  background: var(--energy-high-bg);
-```
-
-它只由 `themeManager` 写入（`energyHighBg`）。也就是说**只有主题加载成功后它才存在**；
-如果主题加载失败，这两条声明会因为值无效被浏览器丢弃 —— 不会报错，那一块就是没背景。
-
-对比 `--ticker-duration`（`style.css:2503`）的写法：它用了兜底
-`var(--ticker-duration, 14s)`，所以即使没人设也有值。**这是两种写法，前者是漏的。**
+旧档：旧版样式表有两处 `background: var(--energy-high-bg)`，但 `:root` 没定义，
+只靠 `themeManager` 注入兜底，主题加载失败就没背景。2026-10 重做后样式表
+**不再引用它**（全站零 `var()` 命中），而 `themeManager` 仍每次注入（`energyHighBg`）。
+也就是说现在改主题文件里的 `energyHighBg` **没有任何视觉效果** —— 和 7.3 那 7 个键同类。
 
 ### 7.3 `themeManager` 只映射 18 个 palette 键，另外 7 个是空转
 
@@ -346,7 +345,7 @@ style.css:1250  background: var(--energy-high-bg);
 1. 想改哪一页 → 查 5.1 拿到视图文件和 `style.css` 的节号。
 2. 要颜色/圆角 → 查第 1 节，**只用令牌**。
 3. 要新文案 → 中文进 `public/zh-cn.js`，key 是英文原文。
-4. 改窄屏 → 直接去 `style.css:2467` 之后，不要在组件那节加。
+4. 改窄屏 → 直接去 `style.css:911` 之后（第 18 段 RESPONSIVE），不要在组件那节加。
 5. 动手前扫一眼第 3 节，确认你没在改钩子。
 6. 改完 **`F5`**（不用硬刷新），然后跑：
 
