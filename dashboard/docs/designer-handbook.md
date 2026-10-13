@@ -29,7 +29,7 @@
 
 ## 1. 设计令牌：24 个，全在 `style.css:5-41` 的 `:root` 里
 
-**只用这些变量，不要写死颜色。** 写死的颜色在暗色模式和 13 个主题下都不会变。
+**只用这些变量，不要写死颜色。** 写死的颜色在暗色模式和主题调色板下都不会变。
 
 ### 1.1 基础色（13 个） —— 也是主题的 `light` 调色板
 
@@ -169,18 +169,18 @@ HTML 的 `href="#…"` 和 `aria-*`），其余由各视图模板自己生成 �
 
 ---
 
-## 4. 主题：13 个现成的，加一个不用重启
+## 4. 主题：现剩一套控制台主题，加一个不用重启
 
 ### 4.1 文件长什么样
 
-`public/themes/` 下有 **13 个主题**（catppuccin、dracula、everforest、flexoki、gruvbox、
-kanagawa、kanagawaWave、nord、rosePine、science、solarized、tokyoNight、default），
-外加 `types.ts`。每个文件导出一个 `ThemeDefinition`：
+`public/themes/` 下现在只有 **1 个主题** `consoleTheme.ts`（2026-10 按用户要求把原来的
+13 套精简成 1 套，主题下拉框隐藏，只留顶栏明暗切换），外加 `types.ts`。
+每个文件导出一个 `ThemeDefinition`：
 
 ```ts
-export const defaultTheme: ThemeDefinition = {
-  id: 'default',
-  name: 'Default',
+export const consoleTheme: ThemeDefinition = {
+  id: 'console',
+  name: 'Console',
   palettes: {
     light: { /* ThemePalette */ },
     dark:  { /* ThemePalette */ },
@@ -202,7 +202,7 @@ export const defaultTheme: ThemeDefinition = {
 
 ### 4.3 加一个主题
 
-1. 复制 `public/themes/nordTheme.ts`，新文件名**必须以 `Theme.ts` 结尾**，改 `id` 和 `name`。
+1. 复制 `public/themes/consoleTheme.ts`，新文件名**必须以 `Theme.ts` 结尾**，改 `id` 和 `name`。
 2. 文件里保持这个形状 —— **加载器靠正则从这个形状里取标识符**：
 
    ```ts
@@ -214,9 +214,8 @@ export const defaultTheme: ThemeDefinition = {
    `lib/themeLoader.js` 的 `extractExportName()` 用 `/export\s+const\s+(\w+)\s*[:=]/`
    把名字抠出来，再生成 `import { yourTheme } from './yourTheme.ts'`。
 
-   **注意：不是 `export default`。** 13 个主题里 12 个是上面这种具名常量导出，
-   唯一的例外 `flexokiTheme.ts` 额外多写了一行 `export default flexokiTheme` ——
-   **那行没有任何人用**，别照它抄。
+   **注意：不是 `export default`。** 现存的 `consoleTheme.ts` 就是上面这种具名常量
+   导出，照它抄就行。
 3. **不用改任何清单**：主题是扫描目录发现的（`*Theme.ts`），`types.ts` 和 `index.ts` 被忽略。
 4. 刷新页面即可 —— `/themes/index.js` 由 `server.js:879` 现生成，
    响应头 `Cache-Control: no-store`（实测确认）。**不用重启面板。**
@@ -314,20 +313,14 @@ Select-String -Path public\style.css -Pattern '^\s*/\*\s*\S' -Encoding UTF8
 
 ---
 
-## 7. 三处已确认的不一致（别当它们是笔误）
+## 7. 已知不一致（7.1 已随重做修复，其余别当笔误）
 
-### 7.1 `--warning` 的 `:root` 值和 `defaultTheme` 不一致
+### 7.1 `--warning` 已和 `consoleTheme` 对齐（旧漂移已修复）
 
-```
-style.css:26                   --warning: #7D4E00;
-themes/defaultTheme.ts  light  warning:  '#8A4B00';
-```
-
-`:root` 的注释写着「aligned with the ThemePalette light definition」—— **24 个令牌里
-只有这一个没对上。**
-
-实际影响很小：主题加载时 `themeManager` 会用主题的值覆盖 `--warning`，所以 `:root`
-那行只在**主题还没加载的那一瞬间**生效。但它是个明确的漂移，改哪边都行，别改一半。
+旧档：`style.css` 的 `:root` 写 `--warning: #7D4E00`，而 `defaultTheme` light 是 `#8A4B00`。
+2026-10 重做后 `:root` 改成 `--warning: var(--warn)`，且 `--warn` 的亮/暗两个值
+（`#A16207` / `#FBBF24`）与 `consoleTheme` 的 light/dark `warning` **完全一致** ——
+这条不再是漂移。主题加载前后都走同一组值。
 
 ### 7.2 `--energy-high-bg` 被用，但 `:root` 里没有
 

@@ -8,7 +8,7 @@ const THEMES_DIR = path.join(__dirname, "..", "public", "themes");
 /**
  * Finds theme palette files by naming convention (anything ending in
  * `Theme.ts`, matching the convention used by the source files themselves:
- * defaultTheme.ts, catppuccinTheme.ts, draculaTheme.ts, ...). `types.ts` and
+ * consoleTheme.ts, ...). `types.ts` and
  * anything named `index.ts` are ignored - the registry below replaces the
  * need for a hand-maintained index file entirely.
  */
@@ -21,8 +21,7 @@ function listThemeFiles() {
   }
   const files = entries.filter((f) => /Theme\.ts$/.test(f) && f !== "types.ts");
 
-  // Stable, predictable ordering: defaultTheme first, then alphabetical -
-  // matches the ordering convention of the source project's own index.ts.
+  // Stable, predictable ordering: any `default*` file first, then alphabetical.
   files.sort((a, b) => {
     const aDefault = /^default/i.test(a);
     const bDefault = /^default/i.test(b);
@@ -35,7 +34,7 @@ function listThemeFiles() {
 
 /**
  * Pulls the exported const identifier out of a theme file, e.g.
- * `export const catppuccinTheme: ThemeDefinition = {` -> "catppuccinTheme".
+ * `export const consoleTheme: ThemeDefinition = {` -> "consoleTheme".
  * Falls back to deriving a name from the filename if the file is oddly
  * formatted, so a slightly different export style still gets picked up.
  */
