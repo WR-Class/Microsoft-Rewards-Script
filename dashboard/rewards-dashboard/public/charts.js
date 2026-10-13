@@ -188,7 +188,10 @@ export function buildHeatmapHtml(days) {
   // "今天"必须和 byDay 的键用同一个时区：那些键是面板按 TZ（Asia/Shanghai）用
   // tzDayKey 切出来的。以前这里用浏览器本地 getter，浏览器不在 UTC+8 时"今天"
   // 高亮会落到相邻格子上。
-  const todayStr = U.tzDayKey(new Date());
+  // 这个模块是具名导入（见文件头），没有 `U` 这个名字 —— 写成 U.tzDayKey 会抛
+  // ReferenceError，被 overview 的 catch 接住，面板上显示成"overview 刷新失败：
+  // U is not defined"，整张热力图都渲染不出来。U 是 app.js 的写法（import * as U）。
+  const todayStr = tzDayKey(new Date());
 
   // 1. Anchor to the beginning (Left Justified)
   // 整张网格都在"日期键"上走：key 直接来自 days 的键空间（与 byDay 同源），加减用纯 UTC，
