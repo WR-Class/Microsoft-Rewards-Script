@@ -160,6 +160,19 @@ export function keyDayOfWeek(key) {
   return new Date(key + "T00:00:00Z").getUTCDay(); // 0=周日 .. 6=周六
 }
 
+// 最近 n 天的日期键序列（含今天），升序。运行历史页的图表游标用它。
+// 提取出来的原因和 keyAddDays 一样：让"与浏览器时区无关"这件事可以**直接跑测试**，
+// 而不是只能靠 grep 断言某段代码里没有 setDate。
+export function recentDayKeys(n, now = new Date()) {
+  const out = [];
+  let key = keyAddDays(tzDayKey(now), -(n - 1));
+  for (let i = 0; i < n; i++) {
+    out.push(key);
+    key = keyAddDays(key, 1);
+  }
+  return out;
+}
+
 export function isoWeekStartKey(year, month, day) {
   const date = new Date(Date.UTC(year, month - 1, day));
   const dow = (date.getUTCDay() + 6) % 7; // Mon=0..Sun=6

@@ -18,14 +18,13 @@ function dailyBars() {
     }
   }
 
+  // 日期游标交给 U.recentDayKeys —— 走纯 UTC 的键运算。原来这里是
+  // setHours(12) + setDate(getDate() ± 1)：那个"本地正午错开 12 小时"的技巧对
+  // 面板 TZ（UTC+8）不成立 —— 浏览器若在 UTC-4，本地正午 = 上海次日 00:00，
+  // tzDayKey 会把整列日期键后移一天（实测确实偏一天）。
   const out = [];
-  const cursor = new Date();
-  cursor.setHours(12, 0, 0, 0);
-  cursor.setDate(cursor.getDate() - (days - 1));
-  for (let i = 0; i < days; i++) {
-    const key = U.tzDayKey(cursor);
+  for (const key of U.recentDayKeys(days)) {
     out.push({ key, value: totals.get(key) || 0 });
-    cursor.setDate(cursor.getDate() + 1);
   }
   return out;
 }
