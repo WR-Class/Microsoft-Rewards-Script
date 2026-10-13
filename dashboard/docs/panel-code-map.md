@@ -440,10 +440,25 @@ cached("accounts", ctx.api.accounts, 5000),   // → /api/accounts
 
 ## 9. 给设计者的最短上手路径
 
-1. 起面板：`node server.js`（在 `dashboard/rewards-dashboard/`，读同目录 `.env`）。
+1. 起面板：在 `dashboard/rewards-dashboard/` 下跑 `node server.js`。
+   **它不读 `.env`，只读 `process.env`** —— 必须在启动它的那个 shell 里先设好，否则会
+   静默回落到 docker 默认值：
+
+   | 变量 | 值 | 不设的后果 |
+   |---|---|---|
+   | `CONTROL_API_URL` | `http://127.0.0.1:3010` | 回落到 `http://microsoft-rewards-script:3010`，连不上 |
+   | `CONTROL_API_TOKEN` | bot `.env` 里的 `API_TOKEN` | 日志报 `(no token)` + `CONTROL_API_TOKEN is empty` |
+   | `BOT_ENV_PATH` | bot 的 `.env` 路径 | 日志报 `Account editing: disabled`，配置页存不了 |
+   | `TZ` | `Asia/Shanghai` | 日期键按 UTC 切，热力图偏一天 |
+   | `LOG_DIR` | bot 的 `logs/` | 启动补录找不到日志 |
+
+   好认的症状：启动日志里 `Control API: ... (token set)` 和
+   `Account editing: enabled -> ...` 这两行才对。**改了 `lib/` 必须重启面板**；
+   只改 `public/` 下的前端文件不用重启（同源静态是 network-first，见 7.1⑥）。
 2. 打开 `public/index.html` 的结构，读 `public/app.js` 的路由，找到视图挂载点。
 3. 要改哪一页，就只改 `public/views/<那一页>.js` + `public/style.css` + `public/zh-cn.js`。
-4. 数字不够用，就按第 6 节的五层顺序往上加，别跳过 `lib/parser.js` 和 `lib/store.js`。
+4. 数字不够用，就按第 6 节的六层顺序往上加，别跳过 `lib/parser.js`、`lib/store.js`，
+   和 `lib/accounts.js` 的 `buildRow()`（白名单，最容易漏的一层）。
 5. **每次改完刷新一遍**（同源静态是 network-first，普通刷新即生效；见 7.1⑥）。
 6. **跑一次 `node tools/check-frontend.mjs`** —— 静态拦住第 8 节里那两类只在运行时
    才炸、且会被 catch 吞掉的错误。它不做构建，只读文件，几秒钟。
