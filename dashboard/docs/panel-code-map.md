@@ -53,9 +53,16 @@
    EventHub  →  hub.on("entry")  →  entryToDockerLine(entry)  →  parseLine(line)  →  store.apply(event)
    ```
 
-   `entryToDockerLine` 会给行首补一个合成时间戳（`parseLine` 要求行首有 Docker 风格的
-   时间戳）。**所以直接拿原始日志行喂 `parseLine` 会静默返回 `null`** ——
-   实测 14517 行解析出 0 条事件，不报错、不抛异常。这是本项目最容易踩的坑。
+   `entryToDockerLine` 会给行首补一个合成时间戳。**解析器要求行首是"一个"非空白
+   token**（`DOCKER_TS_RE = /^(\S+)\s([\s\S]*)$/`，形如 `2026-07-01T12:03:12.123Z`）。
+
+   两个坑叠在一起，都会静默返回 `null`，不报错、不抛异常：
+
+   - 直接拿**原始日志行**喂 `parseLine`：行首没有合成时间戳 → 实测 14517 行解析出 0 条事件。
+   - 自己补前缀、但补成 `2026-10-12 13:42:00.123 `（**带空格**）：`\S+` 只吃掉日期部分，
+     剩下的不以 `[` 开头，`APP_LINE_RE` 于是不匹配 → 同样 0 条。**日志文件里的行自带
+     这种带空格前缀**，必须先剥掉，再补一个单 token 的时间戳。
+
    `store.apply` 的时间戳单调去重也会静默丢弃事件（补录时用 `{ backfill: true }` 绕过）。
 
 ---
@@ -118,8 +125,8 @@
 | 文件 | 职责 |
 |---|---|
 | `apiClient.js` | 控制 API 的 HTTP 客户端。面板 server 里所有 `client.get("/status")` 都走它。**还导出 `entryToDockerLine(entry)`** —— 实时链路的必需一环（见第 0 节要点 4） |
-| `parser.js` | **日志行解析**（把一行日志变成结构化字段；`REACT-PARSE`、`PUNCHCARD` 等 case 在这）。**数字字段一律同时接受 `null`**：上游在"基线未知"时会写 `null` 而不是数字，按 `\d+` 抓会整行匹配失败 |
-| `store.js` | `Store` 类，SQLite 读写与聚合（账号 / 运行 / 历史 / 事件）。面板的数据面。`apply(event, { backfill })`：补录允许比水位旧，但水位只升不降 |
+| `parser.js` | **日志行解析**（把一行日志变成结构化字段；`REACT-PARSE`、`PUNCHCARD` 等 case 在这）。**数字字段一律同时接受 `null`**：上游在"基线未知"时会写 `null` 而不是数字，按 `\d+` 抓会整行匹配失败。<br>与本面板直接有关的两条规则：`已解析任务子项 \| 总数=N \| 可上报=M` → `task-progress`（**`可上报` = 未完成**，所以已完成 = 总数 − 可上报）；`任务列表 \| 父任务=N \| 未完成=M` **不要用** —— 它的 `complete` 依赖抓取片段里出现 `N / M tasks` 进度文本，实测 4 天 135 行一次都没匹配到，`未完成` 恒等于 `父任务`、完成数恒为 0 |
+| `store.js` | `Store` 类，SQLite 读写与聚合（账号 / 运行 / 历史 / 事件）。面板的数据面。`apply(event, { backfill })`：补录允许比水位旧，但水位只升不降。<br>**账号关联键看字段**：`account-end` 等行按 `email`；`task-progress` 那行的账号段是**用户名**，所以 `setAccountTasks` 按 `user_name` 关联（实测 10 个账号按 email 命中 0 行、按 user_name 命中 1 行；写错会一行都更新不到，**且不报错**）。对外字段经 `snapshotAccounts()` / `allAccounts` 暴露成 camelCase |
 | `logFileReplay.js` | **启动时从 `logs/*.log` 按账号对账补录**（`resolveLogDir` / `replayLogFiles`）。**必须在 `EventHub` 连接之前跑完**，否则补录会被时间戳守卫挡住 |
 | `eventHub.js` | SSE 扇出：把新事件推给所有打开的浏览器。注意它的 `replay` 选项**只发给浏览器，不回写 SQLite** |
 | `scheduler.js` / `cron.js` | 调度与定时 |
@@ -233,12 +240,20 @@ cached("accounts", ctx.api.accounts, 5000),   // → /api/accounts
 |---|---|---|
 | **总积分** | **已经显示** | `a.liveBalance ?? a.lastPoints`（跑的时候用实时余额，否则用上次结束时的余额） |
 | **每日获得积分数** | **已经显示** | `days[].gained`，当天那条（`todayGained`） |
-| **总任务量** | **仍然没有** | 日志 `[REACT-PARSE] 任务列表 \| 父任务=N \| 未完成=N`，**解析器还没有抽这两个数**，所以界面上显示「尚未采集」 |
-| **已完成任务** | **仍然没有** | 同上，`父任务 − 未完成` |
+| **总任务量** | **已实现** | `a.totalTasks` ← `accounts.total_tasks` ← 日志 `[REACT-PARSE] 已解析任务子项 \| 总数=N \| 可上报=M` |
+| **已完成任务** | **已实现** | `a.completedTasks` ← `accounts.completed_tasks` ← `总数 − 可上报` |
 
 **这四个数字现在渲染在每行左侧的一条统计带里**（`.hero-stat-strip`，四个 `.hero-stat`），
-右侧仍然是原来的累积条形图。**后两个是空占位**，`title` 提示 `Not collected yet` /
-中文「尚未采集」—— 设计者要做的正是把这两个补上（走下面第 6 节的五层）。
+右侧是累积条形图。**四个都有真实数据了。**
+
+两件必须知道的事：
+
+1. **数据源换过一次。** 最初接的是 `任务列表 \| 父任务=N \| 未完成=M`；跑完一轮发现
+   10 个账号的"已完成"全是 0 —— 那条行的 `complete` 是死的（见第 3 节 `parser.js` 行），
+   已改成 `已解析任务子项`。
+2. **`总数` 的含义。** 它是"最后一次解析到的那个任务块里有几项"（实测 1~5），
+   **不是**"这个账号一共有几个任务"；而 `总数 − 可上报` = **已完成 + 被锁定 + 被禁用**，
+   所以"已完成"会略微高估。上游只报 `可上报`，不直接报"已完成" —— 这是它能给的最接近的数。
 
 ### 加一个字段的固定动作（五层，缺一层就不显示）
 
@@ -273,17 +288,39 @@ cached("accounts", ctx.api.accounts, 5000),   // → /api/accounts
    不是历史数据的来源。**但 `store` 里那些历史表具体由谁写满，我仍然没有逐行追完。**
 2. **`/api/summary` 与 `/api/accounts` 的完整字段形状。** 我只确认了
    `accounts[].key/email/status` 和 `days[].dayKey/gained`，没读完 `store.js` 的聚合。
-3. **`days[]` 的时间窗口与分桶规则**（几天？按哪个时区切天？）。
-   `overview.js` 用了 `U.tzDayKey()`，说明按本地时区切，但窗口长度没核。
+3. ~~**`days[]` 的时间窗口与分桶规则**（几天？按哪个时区切天？）。~~
+   **已核实（2026-10-13）**：分桶函数是 `public/util.js` 的 `bucketByDay(history)`，
+   产出 `{ dayKey, weekKey, gained, lastTotal }`，`dayKey` 按**面板 TZ**（`U.tzDayKey`）切天。
+   热力图不直接消费 `days`：它按 `weekKey` 重排成周列，日期加减走纯 UTC 的键运算
+   （`charts.js` 的 `keyAddDays` / `keyDayOfWeek`）。**窗口长度（一次喂进来几天）仍未核。**
 4. **主题 `.ts` 如何被浏览器加载**（`tsLite.js` 的转译边界没看）。
 5. **`sw.js` 的缓存策略** —— 我只知道它有缓存，不知道是 cache-first 还是 network-first。
 
 ---
 
-## 8. 给设计者的最短上手路径
+## 8. 界面改动的硬约束（改了会静默弄坏）
+
+**完整版：`dashboard/docs/designer-guardrails.md`**，
+配套检查脚本 `rewards-dashboard/tools/check-frontend.mjs`。摘要：
+
+| 不要动 | 会怎样 |
+|---|---|
+| `data-tab` / `data-path` / `data-cron` / `data-*-delete` 等属性名 | 按钮点不动、配置写错 `.env` 变量，**不报错** |
+| `zh-cn.js` 里的 key（或改 key 不同步字典） | 界面露出英文 |
+| `U.escapeHtml` / `escapeAttr` | XSS 与页面错乱 |
+| 模块导入形式（`import * as U` ↔ 具名）而不同步改用法 | `ReferenceError: U is not defined`，**只在渲染那一步炸**，并被外层 catch 显示成"刷新失败" |
+| 用浏览器本地日期（`getDay` / `setDate` / `toLocaleDateString`）算日期键 | 浏览器不在 +8 时热力图整张网格偏一格 |
+| 窄屏隐藏规则改成整块 `display:none` | 统计带被一起藏掉（只该藏 `.accum-track`） |
+
+改完必须：**硬刷新** → `node tools/check-frontend.mjs`（有 ❌ 先修）→ F12 无红字 →
+把「时间线 ↔ 热力图」「账号删除二次确认」「配置页保存」这几条交互各点一遍。
+
+## 9. 给设计者的最短上手路径
 
 1. 起面板：`node server.js`（在 `dashboard/rewards-dashboard/`，读同目录 `.env`）。
 2. 打开 `public/index.html` 的结构，读 `public/app.js` 的路由，找到视图挂载点。
 3. 要改哪一页，就只改 `public/views/<那一页>.js` + `public/style.css` + `public/zh-cn.js`。
 4. 数字不够用，就按第 6 节的五层顺序往上加，别跳过 `lib/parser.js` 和 `lib/store.js`。
 5. **每次改完强刷**（`sw.js` 会缓存）。
+6. **跑一次 `node tools/check-frontend.mjs`** —— 静态拦住第 8 节里那两类只在运行时
+   才炸、且会被 catch 吞掉的错误。它不做构建，只读文件，几秒钟。
