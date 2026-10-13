@@ -2,6 +2,7 @@ import * as U from "../util.js";
 import { cached } from "../api.js";
 // Import BOTH chart builders
 import { buildAccumBarHtml, buildHeatmapHtml, lineChart } from "../charts.js";
+import { icon } from "../icons.js";
 
 let data = null;
 let accountsPayload = null;
@@ -19,18 +20,15 @@ const launching = new Set();
 
 const NUMERIC = /^[+\-\u2013]?[\d,.]*$/;
 
-function statCard(id, value, unit, label, iconClass = "stat-icon-check", icon = "\u2713") {
-  const small = NUMERIC.test(String(value).trim()) ? "" : " stat-value-sm";
+function statCard(id, value, unit, label, icVariant = "", iconName = "check") {
+  const small = NUMERIC.test(String(value).trim()) ? "" : " num--sm";
   return `
-        <div class="stat-card">
-            <div class="stat-block-chip${small ? " chip-sm-wrap" : ""}">
-                <span class="stat-num-val${small}" id="${id}">${value}</span>
-                <span class="stat-block-unit">${U.escapeHtml(unit)}</span>
+        <div class="stat stat-card">
+            <div class="row">
+                <span class="ic ${icVariant}">${icon(iconName, "i sm")}</span>
             </div>
-            <div class="stat-title-row">
-                <span class="${iconClass}" aria-hidden="true">${icon}</span>
-                <span class="stat-label">${U.escapeHtml(label)}</span>
-            </div>
+            <div class="num${small}" id="${id}">${value}${unit ? `<small>${U.escapeHtml(unit)}</small>` : ""}</div>
+            <div class="lbl">${U.escapeHtml(label)}</div>
         </div>`;
 }
 
@@ -131,32 +129,32 @@ function renderStats(root, status) {
   const sched = activeSchedule(status);
 
   U.$("#statGrid", root).innerHTML = [
-    statCard("statAccounts", U.fmtNumber(accounts.length), "profiles", "Accounts tracked"),
-    statCard("statCombined", U.fmtNumber(combined), "points", "Combined balance"),
-    statCard("statLastGained", lastRun ? U.fmtSigned(lastRun.totalGained) : "\u2013", "points", "Points earned last run"),
+    statCard("statAccounts", U.fmtNumber(accounts.length), "profiles", "Accounts tracked", "", "users"),
+    statCard("statCombined", U.fmtNumber(combined), "points", "Combined balance", "", "bars"),
+    statCard("statLastGained", lastRun ? U.fmtSigned(lastRun.totalGained) : "\u2013", "points", "Points earned last run", "", "bolt"),
     statCard(
       "statLastRun",
       anyRunning ? "Running now" : lastRun ? U.fmtRelative(lastRun.endTs || lastRun.startTs) : "\u2013",
       anyRunning ? "" : "timestamp",
       "Last run",
-      anyRunning ? "stat-icon-running" : "stat-icon-check",
-      anyRunning ? "\u25CF" : "\u2713",
+      anyRunning ? "warn" : "",
+      anyRunning ? "activity" : "check",
     ),
     statCard(
       "statErrors",
       U.fmtNumber(errorCount),
       "errors",
       "Accounts in error now",
-      errorCount > 0 ? "stat-icon-alert icon-alert-active" : "stat-icon-check",
-      errorCount > 0 ? "!" : "\u2713",
+      errorCount > 0 ? "bad" : "",
+      "alert",
     ),
     statCard(
       "statSchedule",
       U.escapeHtml(sched.description || "\u2013"),
       sched.timezone || "UTC",
       sched.both ? "Schedule (2 active)" : "Schedule",
-      sched.both ? "stat-icon-alert icon-alert-active" : sched.enabled ? "stat-icon-check" : "stat-icon-idle",
-      sched.both ? "!" : sched.enabled ? "\u2713" : "\u2013",
+      sched.both ? "bad" : sched.enabled ? "ok" : "",
+      "cal",
     ),
   ].join("");
 }
@@ -347,33 +345,34 @@ function renderAccountRows(root) {
             </div>
         </div>`;
 
-      return `<div class="hero-row">
-            <div class="hero-bar-cell">${statStrip}${barCell}</div>
-            <div class="hero-acc-card">
+      const initial = (a.email || "?").charAt(0).toUpperCase();
+
+      return `<div class="hero-row acc-line">
+            <div class="av">${U.escapeHtml(initial)}</div>
+            <div class="acc-info">
+                <div class="acc-mail">
+                    ${MASK_EMAILS ? `ACCOUNT_${a.index}` : U.escapeHtml(a.email)}
+                    ${a.configured ? "" : ' <span class="tag-mini">unconfigured</span>'}
+                </div>
+                <div class="acc-sub">
+                    ${U.statusPill(badgeStatus)}
+                    <span>${U.escapeHtml(todayText)}</span>
+                    ${a.streakCounter != null ? `<span> \u00b7 🔥\u202f${U.fmtNumber(a.streakCounter)}</span>` : ""}
+                </div>
+                <div class="hero-acc-sub">${sub}</div>
+                <div class="hero-bar-cell">${statStrip}${barCell}</div>
+                ${a.lastError
+                  ? `<div class="hero-acc-error">${U.escapeHtml(
+                      a.lastError.length > 120
+                        ? `${a.lastError.slice(0, 119)}…`
+                        : a.lastError
+                    )}</div>`
+                  : ""}
+            </div>
+            <div class="hero-acc-side">
                 <div class="hero-acc-pts">
                     <span class="hero-pts-num">${days ? days.length : "\u2013"}</span>
                     <span class="hero-pts-unit">Days run</span>
-                </div>
-                <div class="hero-acc-info">
-                    <div class="hero-acc-name">
-                        ${MASK_EMAILS ? `ACCOUNT_${a.index}` : U.escapeHtml(a.email)}
-                        ${a.configured ? "" : ' <span class="tag-mini">unconfigured</span>'}
-                    </div>
-                    <div class="hero-acc-meta">
-                        <span class="hero-acc-today">
-                            ${U.statusPill(badgeStatus)}
-                            <span>${U.escapeHtml(todayText)}</span>
-                            ${a.streakCounter != null ? `<span> \u00b7 🔥\u202f${U.fmtNumber(a.streakCounter)}</span>` : ""}
-                        </span>
-                    </div>
-                    <div class="hero-acc-sub">${sub}</div>
-                    ${a.lastError
-                      ? `<div class="hero-acc-error">${U.escapeHtml(
-                          a.lastError.length > 120
-                            ? `${a.lastError.slice(0, 119)}…`
-                            : a.lastError
-                        )}</div>`
-                      : ""}
                 </div>
                 <div class="hero-acc-actions">
                     ${a.configured && Number.isInteger(a.index)
@@ -409,15 +408,19 @@ function renderAccountRows(root) {
     btn.addEventListener("click", () => {
       selected = selected === btn.dataset.trend ? null : btn.dataset.trend;
       renderAccountRows(root);
-      if (selected) {
-        U.$("#ovwTrendSection", root).scrollIntoView({
-          behavior: "smooth",
-          block: "nearest",
-        });
-      }
     }),
   );
 
+  renderTrend();
+}
+
+// 关闭趋势弹窗：只同步按钮态并隐藏弹窗，不重建行（避免时间线被重新卷动）
+function closeTrend() {
+  if (!selected) return;
+  selected = null;
+  rootEl
+    ?.querySelectorAll("button[data-trend]")
+    .forEach((b) => b.setAttribute("aria-pressed", "false"));
   renderTrend();
 }
 
@@ -495,6 +498,9 @@ function renderRunHeader(root, status) {
 
   bar.style.width = `${pct}%`;
   progressWrap.setAttribute("aria-valuenow", String(pct));
+
+  const pctEl = U.$("#runProgressPct", root);
+  if (pctEl) pctEl.innerHTML = total > 0 ? `${pct}<small>%</small>` : "\u2013";
     
   if (!active) {
     progressBox.classList.add("idle");
@@ -514,51 +520,62 @@ export default {
     root.innerHTML = `
             <p class="notice notice--warn" id="ovwAccountsError" hidden></p>
 
-            <section aria-labelledby="stats-heading" class="stats">
+            <section aria-labelledby="stats-heading" class="stats-section">
                 <h2 id="stats-heading" class="visually-hidden">Summary</h2>
                 <div class="stat-grid" id="statGrid"></div>
             </section>
 
-            <section class="panel run-progress-box" id="runProgressBox" aria-labelledby="run-progress-heading">
-                <div class="run-progress-header">
-                    <h2 class="run-progress-title" id="run-progress-heading">Run in progress</h2>
-                    <span id="currentRunMeta" class="run-progress-meta"></span>
+            <section class="card run-progress-box" id="runProgressBox" aria-labelledby="run-progress-heading">
+                <div class="card-h">
+                    <div class="card-ic">${icon("gauge", "i sm")}</div>
+                    <div><div class="card-title" id="run-progress-heading">Run in progress</div><div class="card-sub" id="currentRunMeta"></div></div>
                 </div>
-                <div class="progress" id="currentRunProgressWrap" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-                    <div class="progress-bar" id="currentRunBar"></div>
+                <div class="card-b">
+                    <div class="big-row">
+                        <div class="big grad-text" id="runProgressPct">&ndash;</div>
+                    </div>
+                    <div class="bar progress" id="currentRunProgressWrap" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                        <i id="currentRunBar"></i>
+                    </div>
                 </div>
             </section>
 
-            <section class="panel" id="ovwFailureSection" hidden aria-labelledby="ovw-failure-heading">
-                <div class="panel-head">
-                    <h2 id="ovw-failure-heading">Failure reasons</h2>
-                    <span class="panel-sub" id="ovwFailureSub"></span>
+            <section class="card" id="ovwFailureSection" hidden aria-labelledby="ovw-failure-heading">
+                <div class="card-h">
+                    <div class="card-ic bad">${icon("alert", "i sm")}</div>
+                    <div><div class="card-title" id="ovw-failure-heading">Failure reasons</div><div class="card-sub" id="ovwFailureSub"></div></div>
                 </div>
-                <div id="ovwFailureBody"></div>
+                <div class="card-b" id="ovwFailureBody"></div>
             </section>
 
-            <section class="panel hero-panel" id="currentRun" aria-labelledby="current-run-heading">
-                <div class="hero-panel-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
-                    <div>
-                        <h2 id="current-run-heading" style="margin:0;">Accounts Overview</h2>
-                    </div>
-                    <div class="seg" id="ovwViewToggle">
-                        <button type="button" class="seg-btn ${viewMode === 'accum' ? 'seg-btn--active' : ''}" data-view="accum">Timeline</button>
-                        <button type="button" class="seg-btn ${viewMode === 'heatmap' ? 'seg-btn--active' : ''}" data-view="heatmap">Heatmap</button>
+            <section class="card" id="currentRun" aria-labelledby="current-run-heading">
+                <div class="card-h">
+                    <div class="card-ic">${icon("users", "i sm")}</div>
+                    <div><div class="card-title" id="current-run-heading">Accounts Overview</div></div>
+                    <div class="card-tools">
+                        <div class="seg" id="ovwViewToggle">
+                            <button type="button" class="seg-btn ${viewMode === 'accum' ? 'seg-btn--active' : ''}" data-view="accum">Timeline</button>
+                            <button type="button" class="seg-btn ${viewMode === 'heatmap' ? 'seg-btn--active' : ''}" data-view="heatmap">Heatmap</button>
+                        </div>
                     </div>
                 </div>
-                <div class="hero-layout" id="overviewHeroRows">
+                <div class="acc-lines" id="overviewHeroRows">
                     <p class="empty-note" style="padding:1.25rem">Loading&hellip;</p>
                 </div>
             </section>
 
-            <section class="panel" id="ovwTrendSection" hidden aria-labelledby="ovw-trend-heading">
-                <div class="panel-head">
-                    <h2 id="ovw-trend-heading">Point total &mdash; <span id="ovwTrendName"></span></h2>
-                    <span class="panel-sub">Every recorded balance, oldest to newest</span>
+            <!-- 趋势图改为弹窗（用户：原来点击 Trend 会把页面拉回这张卡，浏览位置被打断）。
+                 复用账号管理弹窗的 .modal-mask/.modal 体系；id 契约不变。 -->
+            <div class="modal-mask" id="ovwTrendSection" hidden>
+                <div class="modal" role="dialog" aria-modal="true" aria-labelledby="ovw-trend-heading">
+                    <div class="modal-h">
+                        <div class="card-ic">${icon("bars", "i sm")}</div>
+                        <div><div class="card-title" id="ovw-trend-heading"><span id="ovwTrendName"></span></div><div class="card-sub">Every recorded balance, oldest to newest</div></div>
+                        <button type="button" class="modal-x" id="ovwTrendClose" aria-label="Close">&times;</button>
+                    </div>
+                    <div id="ovwTrendChart" class="chart-wrap"></div>
                 </div>
-                <div id="ovwTrendChart" class="chart-wrap"></div>
-            </section>`;
+            </div>`;
     mounted = true;
 
     // Attach event listeners for the toggle and save selection to localStorage
@@ -571,6 +588,16 @@ export default {
             localStorage.setItem(VIEW_STORAGE_KEY, viewMode);
             renderAccountRows(rootEl);
         });
+    });
+
+    // 趋势弹窗的关闭路径：X 按钮、点遮罩、Esc（与账号管理弹窗一致）
+    const trendMask = U.$("#ovwTrendSection", root);
+    U.$("#ovwTrendClose", root).addEventListener("click", () => closeTrend());
+    trendMask.addEventListener("click", (e) => {
+        if (e.target === trendMask) closeTrend();
+    });
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && selected) closeTrend();
     });
   },
   

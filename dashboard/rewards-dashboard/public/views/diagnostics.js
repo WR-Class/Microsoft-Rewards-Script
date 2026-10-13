@@ -1,5 +1,6 @@
 import * as U from "../util.js";
 import { cached } from "../api.js";
+import { icon } from "../icons.js";
 
 let rootEl = null;
 let context = null;
@@ -154,10 +155,11 @@ function renderSessions() {
           ? "Nothing stored for this account yet"
           : "";
 
-      return `<div class="session-card">
-                <div class="session-card-info">
-                    <span class="session-card-email">${U.escapeHtml(a.email)}${a.index != null ? ` <span class="tag-mini">ACCOUNT_${a.index}</span>` : ""}</span>
-                    <span class="session-card-meta">${meta}</span>
+      return `<div class="sess">
+                <span class="av sm" aria-hidden="true">${U.escapeHtml((a.email || "?").charAt(0).toUpperCase())}</span>
+                <div class="acc-info">
+                    <div class="acc-mail">${U.escapeHtml(a.email)}</div>
+                    <div class="acc-sub">${meta}</div>
                 </div>
                 <button type="button" class="btn btn-danger btn-small" data-clear-session="${U.escapeAttr(a.email)}"
                     ${disabled ? "disabled" : ""} ${title ? `title="${U.escapeAttr(title)}"` : ""}>
@@ -183,26 +185,30 @@ export default {
     rootEl = root;
     context = ctx;
     root.innerHTML = `
-            <section class="panel" aria-labelledby="sessions-heading">
-                <div class="panel-head">
-                    <h2 id="sessions-heading">Session management</h2>
-                    <span class="panel-sub">Clearing sessions can fix most common login issues</span>
+            <section class="card" aria-labelledby="sessions-heading">
+                <div class="card-h">
+                    <div class="card-ic">${icon("shield", "i sm")}</div>
+                    <div><div class="card-title" id="sessions-heading">Session management</div><div class="card-sub">Clearing sessions can fix most common login issues</div></div>
                 </div>
-                <p class="notice notice--warn">
-                    Clearing a session logs that account out immediately. It will need to sign in again
-                    &mdash; and re-approve 2FA if used &mdash; on its next run. Only clear a session if you're
-                    actually seeing login problems for that account.
-                </p>
-                <div class="session-card-list" id="sessionCardList">
-                    <p class="empty-note" style="padding:1.25rem">Loading&hellip;</p>
+                <div class="card-b">
+                    <p class="notice notice--warn">
+                        Clearing a session logs that account out immediately. It will need to sign in again
+                        &mdash; and re-approve 2FA if used &mdash; on its next run. Only clear a session if you're
+                        actually seeing login problems for that account.
+                    </p>
+                    <div class="session-card-list" id="sessionCardList">
+                        <p class="empty-note" style="padding:1.25rem">Loading&hellip;</p>
+                    </div>
                 </div>
             </section>
 
-            <section class="panel" aria-labelledby="diag-heading">
-                <div class="panel-head">
-                    <h2 id="diag-heading">Error captures</h2>
-                    <span class="panel-sub" id="diagMeta"></span>
-                    <button type="button" id="diagRefresh" class="btn btn-small">Refresh</button>
+            <section class="card" aria-labelledby="diag-heading">
+                <div class="card-h">
+                    <div class="card-ic warn">${icon("activity", "i sm")}</div>
+                    <div><div class="card-title" id="diag-heading">Error captures</div><div class="card-sub" id="diagMeta"></div></div>
+                    <div class="card-tools">
+                        <button type="button" id="diagRefresh" class="btn btn-small">${icon("refresh", "i sm")}Refresh</button>
+                    </div>
                 </div>
                 <ul class="diag-list" id="diagList">
                     <li class="empty-note">Loading&hellip;</li>

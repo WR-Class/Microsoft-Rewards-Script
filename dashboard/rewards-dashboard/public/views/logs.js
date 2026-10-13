@@ -1,4 +1,5 @@
 import * as U from "../util.js";
+import { icon } from "../icons.js";
 
 const MAX_LINES = 3000;
 const LEVEL_RANK = { debug: 0, info: 1, warn: 2, error: 3 };
@@ -24,6 +25,54 @@ const matches = (e) => {
   return hay.includes(filterText);
 };
 
+// --- 运行历史表（从运行页迁来，用户要求放在日志页） --------------------------
+// 过滤口径与原 runs.js 一致：一次真实执行会在历史里留下最多 4 行（wrapper 的
+// 锁获取/释放空行 + 应用自己的 RUN-START/RUN-END），只保留有真实数据的行，
+// 以及任何非纯成功的行（错误/崩溃没有完整数据也值得看）。
+let runsPayload = null;
+
+function hasData(r) {
+  return r.accountsProcessed != null || r.totalGained != null || r.newTotal != null;
+}
+function isInformative(r) {
+  if (r.status === "running" || r.status === "done") return hasData(r);
+  return true;
+}
+
+function renderRuns() {
+  const body = U.$("#runsBody", rootEl);
+  if (!body) return;
+  const runs = (runsPayload?.runs || []).filter(isInformative);
+
+  if (!runs.length) {
+    body.innerHTML =
+      '<tr><td colspan="7" class="empty-note">No runs recorded yet.</td></tr>';
+    return;
+  }
+
+  body.innerHTML = runs
+    .map((r) => {
+      const duration =
+        r.runtimeMin != null
+          ? U.fmtDuration(r.runtimeMin * 60)
+          : r.startTs && r.endTs
+            ? U.fmtDuration(
+              (Date.parse(r.endTs) - Date.parse(r.startTs)) / 1000,
+            )
+            : "–";
+      return `<tr>
+                <td>${U.statusPill(r.status)}</td>
+                <td>${U.escapeHtml(U.fmtDateTime(r.startTs || r.endTs))}</td>
+                <td>${U.escapeHtml(duration)}</td>
+                <td class="num">${r.accountsProcessed != null ? U.fmtNumber(r.accountsProcessed) : "–"}${r.totalAccounts ? ` / ${U.fmtNumber(r.totalAccounts)}` : ""}</td>
+                <td class="num strong">${r.totalGained != null ? U.fmtSigned(r.totalGained) : "–"}</td>
+                <td class="num">${r.newTotal != null ? U.fmtNumber(r.newTotal) : "–"}</td>
+                <td>${r.version ? `v${U.escapeHtml(r.version)}` : "–"}</td>
+            </tr>`;
+    })
+    .join("");
+}
+
 function lineHtml(e) {
   const time = e.ts || (e.receivedAt ? U.fmtTime(e.receivedAt) : "");
   const commaIdx = time.indexOf(", ");
@@ -38,17 +87,19 @@ function lineHtml(e) {
     </div>`;
 }
 
-function atBottom(box) {
-  return box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+function atTop(box) {
+  return box.scrollTop < 60;
 }
 
+// 用户要求：最新日志显示在最上面，滚动条往下滑看以前的 —— 渲染时把缓冲反转，
+// "自动滚动"的锚点也从吸底改为吸顶。
 function renderAll() {
   const box = U.$("#logBox", rootEl);
   const visible = entries.filter(matches);
   box.innerHTML = visible.length
-    ? visible.slice(-MAX_LINES).map(lineHtml).join("")
+    ? visible.slice(-MAX_LINES).reverse().map(lineHtml).join("")
     : '<p class="empty-note">No log lines match the current filter.</p>';
-  if (autoscroll) box.scrollTop = box.scrollHeight;
+  if (autoscroll) box.scrollTop = 0;
   updateMeta();
 }
 
@@ -95,11 +146,11 @@ function addEntry(entry, live) {
 
   if (matches(entry)) {
     const box = U.$("#logBox", rootEl);
-    const wasAtBottom = atBottom(box);
+    const wasAtTop = atTop(box);
     if (box.querySelector(".empty-note")) box.innerHTML = "";
-    box.insertAdjacentHTML("beforeend", lineHtml(entry));
-    while (box.childElementCount > MAX_LINES) box.firstElementChild.remove();
-    if (autoscroll && wasAtBottom) box.scrollTop = box.scrollHeight;
+    box.insertAdjacentHTML("afterbegin", lineHtml(entry));
+    while (box.childElementCount > MAX_LINES) box.lastElementChild.remove();
+    if (autoscroll && wasAtTop) box.scrollTop = 0;
   }
   updateMeta();
   return true;
@@ -123,38 +174,63 @@ export default {
   mount(root, ctx) {
     rootEl = root;
     root.innerHTML = `
-            <section class="panel" aria-labelledby="logs-heading">
-                <div class="panel-head">
-                    <h2 id="logs-heading">Live logs</h2>
-                    <span class="panel-sub" id="logCount">0 lines buffered</span>
-                </div>
-
-                <div class="toolbar">
+            <div class="card batch" aria-labelledby="logs-heading">
+                <div class="card-tools">
+                    <h2 class="card-title" id="logs-heading">Live logs</h2>
                     <label class="field field--inline">
                         <span>Level</span>
                         <select id="logLevel" class="input">
-                            <option value="all">All</option>
-                            <option value="info">Info and up</option>
-                            <option value="warn">Warnings and up</option>
-                            <option value="error">Errors only</option>
+                            <option value="all">全部</option>
+                            <option value="info">信息及以上</option>
+                            <option value="warn">警告及以上</option>
+                            <option value="error">仅错误</option>
                         </select>
                     </label>
                     <label class="field field--grow">
                         <span class="visually-hidden">Search</span>
-                        <input id="logSearch" class="input" type="search" placeholder="Filter lines\u2026" autocomplete="off">
+                        <input id="logSearch" class="input" type="search" placeholder="筛选日志行…" autocomplete="off">
                     </label>
+                </div>
+                <div class="card-tools">
                     <label class="check">
                         <input type="checkbox" id="logAutoscroll" checked>
                         <span>Autoscroll</span>
                     </label>
-                    <button type="button" id="logPause" class="btn">Pause</button>
-                    <button type="button" id="logMore" class="btn">Load 2000</button>
-                    <button type="button" id="logDownload" class="btn">Download</button>
-                    <button type="button" id="logClear" class="btn">Clear</button>
+                    <button type="button" id="logPause" class="btn btn-small">Pause</button>
+                    <button type="button" id="logMore" class="btn btn-small">Load 2000</button>
+                    <button type="button" id="logDownload" class="btn btn-small">${icon("down", "i sm")}Download</button>
+                    <button type="button" id="logClear" class="btn btn-small">Clear</button>
                 </div>
+            </div>
 
-                <div class="log-box" id="logBox" tabindex="0" aria-live="off">
-                    <p class="empty-note">Waiting for log lines\u2026</p>
+            <div class="term">
+                <div class="term-bar">
+                    <span class="tdot" style="background:#FF5F57"></span>
+                    <span class="tdot" style="background:#FEBC2E"></span>
+                    <span class="tdot" style="background:#28C840"></span>
+                    <span class="term-title">runtime.log &mdash; tail -f</span>
+                    <span class="term-count" id="logCount">0 lines buffered</span>
+                </div>
+                <div class="log-box term-body" id="logBox" tabindex="0" aria-live="off">
+                    <p class="empty-note">Waiting for log lines…</p>
+                </div>
+            </div>
+
+            <section class="card" aria-labelledby="runs-table-heading">
+                <div class="card-h">
+                    <div class="card-ic">${icon("activity", "i sm")}</div>
+                    <div><div class="card-title" id="runs-table-heading">Run history</div><div class="card-sub">Parsed from the bot&rsquo;s own log output</div></div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Status</th><th>Started</th><th>Duration</th>
+                                <th>Accounts</th><th>Gained</th><th>New total</th><th>Version</th>
+                            </tr>
+                        </thead>
+                        <tbody id="runsBody"></tbody>
+                    </table>
                 </div>
             </section>`;
 
@@ -173,7 +249,7 @@ export default {
       autoscroll = e.target.checked;
       if (autoscroll) {
         const box = U.$("#logBox", rootEl);
-        box.scrollTop = box.scrollHeight;
+        box.scrollTop = 0;
       }
     });
     U.$("#logPause", root).addEventListener("click", () => {
@@ -207,6 +283,13 @@ export default {
   },
 
   async refresh(ctx) {
+    // 运行历史卡随日志页一起加载（本视图 interval 为 0 不轮询，进 tab 时拉一次）。
+    try {
+      runsPayload = await ctx.api.runs(100);
+      renderRuns();
+    } catch (e) {
+      U.toast(`运行历史加载失败：${e.message}`, "error");
+    }
     if (entries.length) return;
     try {
       const res = await ctx.api.logs(500);

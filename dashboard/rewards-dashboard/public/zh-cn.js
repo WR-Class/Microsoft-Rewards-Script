@@ -21,6 +21,7 @@ const EXACT = {
   "Rewards Dashboard": "微软积分面板",
   "Microsoft Rewards Dashboard": "微软积分面板",
   "Connecting…": "连接中…",
+  "Loading…": "加载中…",
   "Switch to dark mode": "切换到深色模式",
   "Switch to light mode": "切换到浅色模式",
   Theme: "主题",
@@ -142,6 +143,7 @@ const EXACT = {
   "Current streak": "当前连击",
   "Success streak": "成功连击",
   "Streak protection": "连击保护",
+  "Streak & protection": "连击与保护",
   "Protection days remaining": "保护剩余天数",
   "Protection status checked": "已检查保护状态",
   "Last duration": "上次耗时",
@@ -212,6 +214,8 @@ const EXACT = {
   // --- schedule ------------------------------------------------------------
   "Automatic runs": "自动运行",
   "Current state": "当前状态",
+  "Two schedulers are available — pick the one that fits your setup":
+    "有两种调度器可用 — 按你的环境选择其一",
   "Scheduler location": "调度器位置",
   "This dashboard": "本面板",
   "Bot container (Docker cron)": "机器人容器（Docker cron）",
@@ -451,6 +455,21 @@ const EXACT = {
   "30sec": "30 秒",
   "1min": "1 分钟",
   "3min": "3 分钟",
+
+  // --- overview stat-card inline units (独立 <small> 文本节点) ----------------
+  profiles: "个账户",
+  points: "分",
+  errors: "个错误",
+  // "timestamp" 是上次运行卡的伪单位（数字本身已是"5h 前"），原型不显示单位，置空
+  timestamp: "",
+
+  // --- config: delay 组合字段（label — min/max 在同一文本节点） --------------
+  "Delay before next account — min": "下一个账户前的延迟 — 最小",
+  "Delay before next account — max": "下一个账户前的延迟 — 最大",
+  "Delay between searches — min": "搜索间隔 — 最小",
+  "Delay between searches — max": "搜索间隔 — 最大",
+  "Delay for reading — min": "阅读停留 — 最小",
+  "Delay for reading — max": "阅读停留 — 最大",
 };
 
 // Patterns for text that carries a value. Whole-string rules only, so nothing
@@ -487,7 +506,48 @@ const RULES = [
     /\)\.\s*The control API exposes full local email addresses but never sends passwords, recovery addresses, TOTP secrets, or proxy credentials\./,
     "）。控制 API 会显示完整的本地邮箱地址，但从不发送密码、恢复邮箱、TOTP 密钥或代理凭据。",
   ],
+  // 多行模板字面量：文本节点内部带换行+缩进，EXACT 整串匹配不上，用 \s+ 容忍。
+  [
+    /^Clearing a session logs that account out immediately\.\s*It will need to sign in again\s*— and re-approve 2FA if used — on its next run\.\s*Only clear a session if you're\s*actually seeing login problems for that account\.$/,
+    "清除会话会让该账户立即退出登录。下次运行时它需要重新登录——如果启用了 2FA 还要重新批准。只有在该账户确实出现登录问题时才清除会话。",
+  ],
 ];
+
+// 短语级替换（g 全局）：用于一个文本节点里塞了多个动态片段的场合，
+// 典型是"上次运行"卡的 ticker："v4.3.2.4 · 10/10 done · 2 clusters"。
+// EXACT / RULES 都是整串命中即返回，无法同时替换其中两处 —— 这里在最后统一过一遍。
+const PHRASES = [
+  [/(\d+)\/(\d+) accounts/g, "$1/$2 个账户"],
+  [/(\d+)\/(\d+) done/g, "$1/$2 完成"],
+  [/(\d+) accounts seen/g, "$1 个账户已见"],
+  [/(\d+) clusters?/g, "$1 个集群"],
+  [/(\d+) running/g, "$1 个运行中"],
+  [/(\d+) pending/g, "$1 个等待中"],
+  [/([+-][\d,.]+) points/g, "$1 分"],
+  // fmtRelative 的相对时间（常嵌在 hero 副标题这种多片段文本节点里）
+  [/(\d+)m ago/g, "$1 分钟前"],
+  [/(\d+)h ago/g, "$1 小时前"],
+  [/(\d+)d ago/g, "$1 天前"],
+  // 兼容：整串被上面 RULES 的 "(.+) ago" 先替换成 "Nh 前 / Nm 前" 之后的形态
+  [/(\d+)m 前/g, "$1 分钟前"],
+  [/(\d+)h 前/g, "$1 小时前"],
+  [/(\d+)d 前/g, "$1 天前"],
+  // 账户详情：连击/保护的动态值（"Protection On · 14 days left"、"2 runs"、"5 days"）
+  [/Protection On/g, "保护开启"],
+  [/Protection Off/g, "保护关闭"],
+  // 运行页图表副标题整串片段（"over 14 days · 5 days with a run"），须排在通用 "N days" 之前
+  [/over (\d+) days?/g, "近 $1 天"],
+  [/(\d+) days? with a run/g, "$1 天有运行"],
+  [/(\d+) days? left/g, "$1 天剩余"],
+  [/(\d+) days?/g, "$1 天"],
+  [/(\d+) runs?\b/g, "$1 次"],
+];
+
+function applyPhrases(s) {
+  let out = s;
+  for (const [re, rep] of PHRASES) out = out.replace(re, rep);
+  return out;
+}
 
 function translateString(s) {
   const trimmed = s.trim();
@@ -501,10 +561,10 @@ function translateString(s) {
     if (re.test(trimmed)) {
       const lead = s.slice(0, s.indexOf(trimmed[0]));
       const tail = s.slice(lead.length + trimmed.length);
-      return lead + trimmed.replace(re, rep) + tail;
+      return applyPhrases(lead + trimmed.replace(re, rep) + tail);
     }
   }
-  return s;
+  return applyPhrases(s);
 }
 
 if (typeof module !== "undefined" && module.exports) {
@@ -517,13 +577,14 @@ if (typeof module !== "undefined" && module.exports) {
 
   // Never touch raw payloads: the log stream, the config JSON editor, code
   // blocks, form controls, and anything explicitly opted out.
+  // OPTION 不在跳过名单里：下拉选项的显示文本是纯展示（JS 只读 .value），
+  // 翻译它才能让 schedMisfire 这类原生 select 中文化。
   const SKIP_TAGS = new Set([
     "SCRIPT",
     "STYLE",
     "TEXTAREA",
     "INPUT",
     "SELECT",
-    "OPTION",
     "CODE",
     "PRE",
     "SVG",

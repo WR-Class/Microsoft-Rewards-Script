@@ -1,5 +1,6 @@
 import * as U from "../util.js";
 import { api } from "../api.js";
+import { icon } from "../icons.js";
 
 const REDACTED = "***REDACTED***";
 
@@ -586,9 +587,9 @@ function switchHtml(b) {
   const label = meta?.label || fallbackLabel(b.path);
   const desc = meta?.desc || "";
   return `
-        <label class="switch" title="${U.escapeAttr(fieldTooltip(b.path, desc))}">
-            <input type="checkbox" data-path="${U.escapeAttr(b.path)}" ${b.value ? "checked" : ""}>
-            <span class="switch-label hint-text">${U.escapeHtml(label)}</span>
+        <label class="sw-card" title="${U.escapeAttr(fieldTooltip(b.path, desc))}">
+            <span class="sw"><input type="checkbox" data-path="${U.escapeAttr(b.path)}" ${b.value ? "checked" : ""}><span class="tr"></span></span>
+            <span><span class="sw-t">${U.escapeHtml(label)}</span>${desc ? `<div class="sw-d">${U.escapeHtml(desc)}</div>` : ""}</span>
         </label>`;
 }
 
@@ -753,11 +754,13 @@ function fieldHtml(path, def) {
 function webhookFilterTipHtml() {
   return `
         <p class="notice notice--info cfg-tip">
+            <span class="cfg-tip-text">
             Set <strong>Webhook log filter</strong> to <em>on</em> before enabling a push-notification
             webhook like ntfy, or you&rsquo;ll get a notification for every log line, including debug noise.
             With it enabled, only account start, 2FA codes, and account completion summaries are delivered.
             Use whitelist mode and the &ldquo;Webhook filter keywords&rdquo; field below to customize exactly
             which notifications you receive.
+            </span>
             <span class="notice-actions">
                 <button type="button" id="cfgWebhookFilterTipBtn" class="btn btn-primary btn-small">Apply recommended filter</button>
                 <span class="notice-sub">whitelist &middot; starting account, select number, collected</span>
@@ -1003,24 +1006,28 @@ export default {
             <p class="notice notice--warn" id="cfgNotice" hidden></p>
             <div id="cfgDrift" hidden></div>
 
-            <section class="panel" aria-labelledby="cfg-settings-heading">
-                <div class="panel-head">
-                    <h2 id="cfg-settings-heading">Settings</h2>
-                    <span class="panel-sub">Saves each change automatically. Applies on the next run.</span>
+            <section class="card" aria-labelledby="cfg-settings-heading">
+                <div class="card-h">
+                    <div class="card-ic">${icon("bolt", "i sm")}</div>
+                    <div><div class="card-title" id="cfg-settings-heading">Settings</div><div class="card-sub">Saves each change automatically. Applies on the next run.</div></div>
                 </div>
-                <div class="cfg-toggle-groups" id="cfgSettings"></div>
+                <div class="card-b">
+                    <div class="cfg-toggle-groups" id="cfgSettings"></div>
+                </div>
             </section>
 
-            <section class="panel" aria-labelledby="cfg-raw-heading">
-                <div class="panel-head">
-                    <h2 id="cfg-raw-heading">Raw config</h2>
-                    <span class="panel-sub">Only the fields you actually change are sent</span>
-                    <label class="check">
-                        <input type="checkbox" id="cfgReveal">
-                        <span>Reveal secrets</span>
-                    </label>
+            <section class="card" aria-labelledby="cfg-raw-heading">
+                <div class="card-h">
+                    <div class="card-ic vio">${icon("term", "i sm")}</div>
+                    <div><div class="card-title" id="cfg-raw-heading">Raw config</div><div class="card-sub">Only the fields you actually change are sent</div></div>
+                    <div class="card-tools">
+                        <label class="check">
+                            <input type="checkbox" id="cfgReveal">
+                            <span>Reveal secrets</span>
+                        </label>
+                    </div>
                 </div>
-
+                <div class="card-b">
                 <p class="notice notice--info" id="cfgRedacted" hidden>
                     Webhook URLs and tokens are shown as <code>${REDACTED}</code>. Saving never overwrites them &mdash;
                     only the fields you edit are sent. To see and edit them, set <code>API_ALLOW_CONFIG_REVEAL=true</code>
@@ -1032,6 +1039,7 @@ export default {
                 <div class="form-actions">
                     <button type="button" id="cfgSave" class="btn btn-primary">Save changes</button>
                     <button type="button" id="cfgReload" class="btn" title="Discard unsaved edits and re-fetch config.json from the bot.">Reload from API</button>
+                </div>
                 </div>
             </section>`;
 

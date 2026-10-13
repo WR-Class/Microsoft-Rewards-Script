@@ -1,395 +1,15 @@
 import * as U from "../util.js";
-import { cached } from "../api.js";
+import { icon } from "../icons.js";
 
-let accountsPayload = null;
+// 账户列表 + 批量运行条已按用户要求迁到运行页（runs.js，「每日积分」卡下面）——
+// 跑一次、看趋势、看退出都在同一页。本页只剩一件事：读写机器人的 .env。
+
 let rootEl = null;
-let mounted = false;
 let context = null;
 
-const launching = new Set();
-// Stored negatively - the accounts the operator UNchecked - so "run everything"
-// is the default and an account added to .env later is included without having
-// to re-tick anything.
-const deselectedForBatch = new Set();
-const isBatchSelected = (index) => !deselectedForBatch.has(index);
-const expandedAccounts = new Set();
-let batchRunning = false;
-
-// Two-step delete: a key must be "armed" by a first click before a second
-// click on the confirm button actually deletes anything, so there's no way
-// to remove an account's dashboard data with a single accidental click.
-const deleteArmed = new Set();
-const deleting = new Set();
-
-const SOURCE_LABELS = {
-  search: "Search",
-  bonus: "Bonus search",
-  read: "Read",
-  checkIn: "Check-in",
-  claimReward: "Claim reward",
-  claimBonus: "Claim bonus",
-  urlReward: "URL reward",
-  visualSearch: "Visual search",
-  appReward: "App reward",
-  punchcard: "Punchcard",
-  searchOnBing: "Search activity",
-};
-
-function controlState() {
-  const status = context?.status;
-  const usable = Boolean(status?.reachable && status?.authOk !== false);
-  const running = Boolean(status?.botRunning);
-  return { usable, running };
-}
-
-async function runAccount(account) {
-  if (!context || !account.configured || !Number.isInteger(account.index)) return;
-
-  launching.add(account.index);
-  render(rootEl);
-  try {
-    await context.api.control("start", { accountIndex: account.index });
-    context.toast(
-      `Started ACCOUNT_${account.index} only (${account.email}).`,
-      "success",
-    );
-    context.invalidate();
-    await context.refresh();
-  } catch (error) {
-    context.toast(error.message, error.status === 409 ? "warn" : "error");
-  } finally {
-    launching.delete(account.index);
-    render(rootEl);
-  }
-}
-
-function selectableAccounts() {
-  return (accountsPayload?.accounts || []).filter(
-    (a) => a.configured && Number.isInteger(a.index),
-  );
-}
-
-// Removes an account's stored data (status, history, activity log) from the
-// dashboard's own database. This never touches the bot itself - it's meant
-// for accounts the bot no longer runs (removed from .env) whose dashboard
-// data would otherwise linger forever.
-async function deleteAccount(account) {
-  if (!context) return;
-
-  deleteArmed.delete(account.key);
-  deleting.add(account.key);
-  render(rootEl);
-  try {
-    await context.api.deleteDashboardAccount(account.email);
-    context.toast(`Removed ${account.email} from the dashboard.`, "success");
-    context.invalidate();
-    await context.refresh();
-  } catch (error) {
-    context.toast(error.message, error.status === 409 ? "warn" : "error");
-  } finally {
-    deleting.delete(account.key);
-    render(rootEl);
-  }
-}
-
-async function runSelectedAccounts() {
-  if (!context) return;
-  const configured = selectableAccounts();
-  const selectedIndexes = configured
-    .filter((a) => isBatchSelected(a.index))
-    .map((a) => a.index);
-  if (!selectedIndexes.length) return;
-
-  // The control API only accepts an exclusion list, so a "run these x of y"
-  // request is expressed as "exclude everyone else" - which is how the
-  // selection is stored.
-  const excludedAccountIndexes = configured
-    .filter((a) => !isBatchSelected(a.index))
-    .map((a) => a.index);
-
-  batchRunning = true;
-  render(rootEl);
-  try {
-    await context.api.control("start", { excludedAccountIndexes });
-    context.toast(
-      `Started ${selectedIndexes.length}/${configured.length} selected accounts.`,
-      "success",
-    );
-    context.invalidate();
-    await context.refresh();
-  } catch (error) {
-    context.toast(error.message, error.status === 409 ? "warn" : "error");
-  } finally {
-    batchRunning = false;
-    render(rootEl);
-  }
-}
-
-function renderBatchToolbar(root) {
-  const configured = selectableAccounts();
-  const configuredIndexes = new Set(configured.map((a) => a.index));
-  // Drop un-ticked marks for accounts that disappeared (e.g. .env edited).
-  for (const index of [...deselectedForBatch]) {
-    if (!configuredIndexes.has(index)) deselectedForBatch.delete(index);
-  }
-
-  const { usable, running } = controlState();
-  const count = configured.filter((a) => isBatchSelected(a.index)).length;
-  const total = configured.length;
-
-  U.$("#accountsSelectedCount", root).textContent = `${count}/${total} selected`;
-
-  const allBtn = U.$("#accountsSelectAll", root);
-  allBtn.checked = total > 0 && count === total;
-  allBtn.indeterminate = count > 0 && count < total;
-  allBtn.disabled = total === 0;
-
-  const runBtn = U.$("#accountsRunSelected", root);
-  runBtn.disabled = !usable || running || batchRunning || count === 0;
-  runBtn.textContent = batchRunning ? "Starting\u2026" : "Run selected";
-}
-
-function earnableBadge(account) {
-  const earnable = account.earnable || account.live?.earnable;
-  const total = earnable
-    ? Object.values(earnable).reduce((sum, points) => sum + (Number(points) || 0), 0)
-    : 0;
-  if (total <= 0) return "";
-  return `<span class="point-source point-source--target"><strong>Earnable</strong> ${U.escapeHtml(U.fmtNumber(total))}</span>`;
-}
-
-// Only sources that actually earned something today — ten "+0" chips per
-// account is noise, not detail.
-function sourceBreakdown(account) {
-  const bySource = account.live?.bySource || {};
-  return Object.entries(SOURCE_LABELS)
-    .filter(([source]) => Number(bySource[source]) > 0)
-    .map(
-      ([source, label]) =>
-        `<span class="point-source"><strong>${U.escapeHtml(label)}</strong> ${U.escapeHtml(U.fmtSigned(Number(bySource[source])))}</span>`,
-    )
-    .join("");
-}
-
-function protectionPresentation(account) {
-  if (account.streakProtectionEnabled == null) return null;
-
-  const remaining = account.streakProtectionRemainingDays;
-  const days =
-    remaining == null
-      ? "days unavailable"
-      : `${remaining} protection day${remaining === 1 ? "" : "s"} left`;
-  const state = account.streakProtectionEnabled ? "On" : "Off";
-  const streak =
-    account.streakCounter == null
-      ? "streak unavailable"
-      : `${U.fmtNumber(account.streakCounter)} day${account.streakCounter === 1 ? "" : "s"} current streak`;
-
-  return {
-    state,
-    days,
-    streak,
-    pillClass:
-      account.streakProtectionEnabled && remaining !== 0
-        ? "pill-success"
-        : remaining === 0
-          ? "pill-warn"
-          : "pill-idle",
-  };
-}
-
-function kv(items) {
-  return `<dl class="kv">${items
-    .map(
-      ([k, v]) =>
-        `<div><dt>${U.escapeHtml(k)}</dt><dd>${U.escapeHtml(String(v))}</dd></div>`,
-    )
-    .join("")}</dl>`;
-}
-
-function detailGroups(a, protection) {
-  const groups = [];
-
-  groups.push([
-    "Configuration",
-    [
-      ["Configured in .env", a.configured ? "Yes" : "No \u2014 seen in logs only"],
-      ...(a.geoLocale ? [["Geo locale", a.geoLocale]] : []),
-      ...(a.langCode ? [["Language", a.langCode]] : []),
-      ...(a.hasTotp != null ? [["TOTP secret", a.hasTotp ? "Set" : "Not set"]] : []),
-      ...(a.hasRecoveryEmail != null
-        ? [["Recovery email", a.hasRecoveryEmail ? "Set" : "Not set"]]
-        : []),
-      [
-        "Proxy",
-        a.proxy
-          ? `${a.proxy.url}${a.proxy.port ? `:${a.proxy.port}` : ""}${a.proxy.hasCredentials ? " (authenticated)" : ""}`
-          : "None",
-      ],
-    ],
-  ]);
-
-  groups.push([
-    "Streak &amp; protection",
-    [
-      ["Success streak", a.successStreak == null ? "\u2013" : `${a.successStreak} run${a.successStreak === 1 ? "" : "s"}`],
-      ...(protection
-        ? [
-          [
-            "Current streak",
-            a.streakCounter == null
-              ? "Unavailable"
-              : `${U.fmtNumber(a.streakCounter)} day${a.streakCounter === 1 ? "" : "s"}`,
-          ],
-          ["Streak protection", protection.state === "On" ? "Enabled" : "Disabled"],
-          [
-            "Protection days remaining",
-            a.streakProtectionRemainingDays == null
-              ? "Unavailable"
-              : `${a.streakProtectionRemainingDays} day${a.streakProtectionRemainingDays === 1 ? "" : "s"}`,
-          ],
-          ...(a.streakProtectionUpdatedAt
-            ? [["Protection status checked", U.fmtRelative(a.streakProtectionUpdatedAt)]]
-            : []),
-        ]
-        : []),
-    ],
-  ]);
-
-  groups.push([
-    "Run history",
-    [
-      ["Runs recorded by the API", a.apiRuns == null ? "\u2013" : U.fmtNumber(a.apiRuns)],
-      ["Points collected (API history)", U.fmtSigned(a.apiTotalCollected)],
-      ["Last duration", U.fmtDuration(a.lastDurationSec)],
-      ["History points loaded", U.fmtNumber(a.historyCount)],
-    ],
-  ]);
-
-  return `<div class="acc-detail-groups">${groups
-    .map(
-      ([title, items]) => `
-        <div class="acc-detail-group">
-            <h3 class="acc-detail-group-title">${title}</h3>
-            ${kv(items)}
-        </div>`,
-    )
-    .join("")}</div>`;
-}
-
-// Mirrors overview.js's statCard icon convention (stat-icon-check /
-// -running / -alert icon-alert-active / -idle with \u2713 / \u25CF / ! / \u2013)
-// so an account's live status reads the same way here as it does there.
-function statusIconParts(statusKey) {
-  switch (statusKey) {
-    case "success":
-    case "done":
-      return { cls: "stat-icon-check", icon: "\u2713", label: "Success" };
-    case "running":
-    case "starting":
-    case "stopping":
-      return { cls: "stat-icon-running", icon: "\u25CF", label: U.pillParts(statusKey).label };
-    case "pending":
-      return { cls: "stat-icon-pending", icon: "\u25CF", label: U.pillParts(statusKey).label };
-    case "error":
-    case "crashed":
-    case "interrupted":
-    case "stopped":
-      return { cls: "stat-icon-alert icon-alert-active", icon: "!", label: U.pillParts(statusKey).label };
-    default:
-      return { cls: "stat-icon-idle", icon: "\u2013", label: "Idle" };
-  }
-}
-
-function renderAccountPanel(a, live) {
-  const protection = protectionPresentation(a);
-  const { usable, running } = controlState();
-
-  // Accounts now start one at a time (accountDelay), so mid-run there can be
-  // several accounts that already finished this run while another is still
-  // going - `live` just means "has a record in this run", true for both.
-  // a.status is this account's own last-observed outcome (idle/running/
-  // success/error), so it correctly tells finished accounts apart from the
-  // one actually in progress right now.
-  // Mirrors overview.js: while waiting between accounts, the one named by
-  // pendingDelay.nextEmail is up next, so it reads as "pending" rather than
-  // whatever its last-observed status happened to be.
-  const nextAccountEmail = context?.status?.pendingDelay?.nextEmail || null;
-  const statusKey = launching.has(a.index)
-    ? "starting"
-    : a.status !== "running" && nextAccountEmail && a.email === nextAccountEmail
-      ? "pending"
-      : a.status;
-
-  const runButton =
-    a.configured && Number.isInteger(a.index)
-      ? `<button type="button" class="btn btn-primary btn-small" data-run-account="${a.index}" ${!usable || running || launching.has(a.index) ? "disabled" : ""
-      } title="Run only ACCOUNT_${a.index}">${launching.has(a.index) ? "Starting\u2026" : "Run only"}</button>`
-      : "";
-
-  const selectCheckbox =
-    a.configured && Number.isInteger(a.index)
-      ? `<label class="check acc-batch-select" title="Include ACCOUNT_${a.index} in a batch run">
-          <input type="checkbox" data-select-account="${a.index}" ${isBatchSelected(a.index) ? "checked" : ""}>
-          <span>Select</span>
-        </label>`
-      : "";
-
-  const { cls: statusIconCls, icon: statusIcon, label: statusLabel } = statusIconParts(statusKey);
-  const isExpanded = expandedAccounts.has(a.key);
-  const detailsId = `acc-details-${U.escapeAttr(a.key)}`;
-
-  const isDeleting = deleting.has(a.key);
-  const deleteBlocked = a.status === "running" || launching.has(a.index);
-  const deleteButton = deleteArmed.has(a.key)
-    ? `<span class="acc-delete-confirm">
-        <button type="button" class="btn btn-small" data-cancel-delete="${U.escapeAttr(a.key)}" ${isDeleting ? "disabled" : ""}>Cancel</button>
-        <button type="button" class="btn btn-danger btn-small" data-confirm-delete="${U.escapeAttr(a.key)}" ${isDeleting ? "disabled" : ""} title="Permanently remove this account and its history from the dashboard">
-            ${isDeleting ? "Removing\u2026" : "Are you sure?"}
-        </button>
-      </span>`
-    : `<button type="button" class="btn btn-danger btn-small" data-arm-delete="${U.escapeAttr(a.key)}" ${deleteBlocked ? "disabled" : ""} title="${deleteBlocked ? "The account must be idle to delete it" : "Remove this account and its history from the dashboard"}">Delete</button>`;
-
-  const chips = [
-    protection
-      ? `<span class="pill ${protection.pillClass}" title="${U.escapeAttr(protection.streak)}; streak protection is ${protection.state.toLowerCase()}; ${U.escapeAttr(protection.days)}">Protection ${protection.state} \u00b7 ${a.streakProtectionRemainingDays == null ? "days unavailable" : `${a.streakProtectionRemainingDays} day${a.streakProtectionRemainingDays === 1 ? "" : "s"} left`}</span>`
-      : "",
-    earnableBadge(live || {}),
-    sourceBreakdown(live || {}),
-  ]
-    .filter(Boolean)
-    .join("");
-
-  return `
-    <div class="panel account-detail-panel">
-        <div class="panel-head">
-            <h2>
-                <button type="button" class="acc-detail-toggle" data-toggle-details="${U.escapeAttr(a.key)}" aria-expanded="${isExpanded}" aria-controls="${detailsId}" title="${isExpanded ? "Collapse details" : "Expand details"}">\u25b8</button>
-                <span class="acc-status-icon ${statusIconCls}" role="img" aria-label="${U.escapeAttr(statusLabel)}" title="${U.escapeAttr(statusLabel)}">${statusIcon}</span>${U.escapeHtml(a.email)}
-            </h2>
-            ${a.index != null ? `<span class="tag-mini acc-tag-account-id">ACCOUNT_${a.index}</span>` : ""}
-            ${a.configured ? "" : '<span class="tag-mini">unconfigured</span>'}
-            <span class="acc-detail-actions">
-                <span class="acc-status-pill">${U.statusPill(statusKey)}</span>
-                ${selectCheckbox}
-                ${runButton}
-                ${deleteButton}
-            </span>
-        </div>
-        <div class="panel-body" id="${detailsId}" ${isExpanded ? "" : "hidden"}>
-            ${detailGroups(a, protection)}
-        </div>
-        ${chips ? `<div class="account-today-row">
-            <span class="account-today-label">Today</span>
-            <div class="account-today-chips">${chips}</div>
-        </div>` : ""}
-    </div>`;
-}
-
 // --- the bot's own accounts (its .env) -------------------------------------
-// Everything else in this view is about accounts the dashboard has *observed*.
-// These are the accounts the bot will *read on its next start* - a different
-// thing, and the only one the dashboard can write. Saving here edits the bot's
+// Everything in this view is about accounts the bot will *read on its next
+// start* — the only thing the dashboard can write. Saving here edits the bot's
 // .env; only the bot's own restart makes the change real, so the save path ends
 // by offering that restart rather than implying the account is already live.
 
@@ -399,6 +19,7 @@ function renderManageBox(root) {
   const hint = U.$("#accountsManageHint", root);
   const form = U.$("#accountsManageForm", root);
   const list = U.$("#accountsManageList", root);
+  const addBtn = U.$("#accountsManageAdd", root);
   if (!hint || !form || !list) return;
 
   if (!managePayload) {
@@ -409,7 +30,7 @@ function renderManageBox(root) {
   if (!managePayload.enabled) {
     hint.textContent =
       "此功能已关闭：面板的 .env 里没有配置 BOT_ENV_PATH（指向机器人目录下的 .env）。配置好并重启面板即可启用。";
-    form.hidden = true;
+    if (addBtn) addBtn.disabled = true;
     list.innerHTML = "";
     return;
   }
@@ -425,21 +46,22 @@ function renderManageBox(root) {
     hint.textContent = `机器人 .env 里还没有账号，填一个邮箱即可。${where}`;
   }
 
-  form.hidden = false;
+  if (addBtn) addBtn.disabled = false;
   list.innerHTML = accounts
     .map((a) => {
+      // 密码状态不显示（用户点名去掉"密码已存"），只留 TOTP/地区/语言这些
+      // 弹窗里不会回显、又影响登录行为的信息。
       const meta = [
-        a.hasPassword ? "密码已存" : "无密码",
         a.hasTotpSecret ? "TOTP 已存" : "",
         a.geoLocale ? `地区 ${a.geoLocale}` : "",
         a.langCode ? `语言 ${a.langCode}` : "",
       ].filter(Boolean);
 
       return `
-      <div class="acc-manage-row" style="display:flex;align-items:center;gap:0.6rem;padding:0.4rem 0;border-top:1px solid var(--border);">
-        <span style="font-weight:600;">ACCOUNT_${a.index}</span>
-        <span style="flex:1;min-width:0;overflow-wrap:anywhere;">${U.escapeHtml(a.email)}</span>
-        <span class="hint" style="flex:0 0 auto;">${U.escapeHtml(meta.join(" · "))}</span>
+      <div class="acc-manage-row">
+        <span class="acc-manage-index">${a.index}</span>
+        <span class="acc-manage-mail">${U.escapeHtml(a.email)}</span>
+        ${meta.length ? `<span class="hint" style="flex:0 0 auto;">${U.escapeHtml(meta.join(" · "))}</span>` : ""}
         <button type="button" class="btn btn-small" data-manage-edit="${a.index}">编辑</button>
         <button type="button" class="btn btn-danger btn-small" data-manage-remove="${a.index}">删除</button>
       </div>`;
@@ -493,11 +115,21 @@ function manageForm() {
   return {
     form: U.$("#accountsManageForm", rootEl),
     index: U.$("#accountsManageForm input[name=index]", rootEl),
-    title: U.$("#accountsManageTitle", rootEl),
+    title: U.$("#accountsManageModalTitle", rootEl),
     submit: U.$("#accountsManageSubmit", rootEl),
-    cancel: U.$("#accountsManageCancel", rootEl),
     note: U.$("#accountsManageEditNote", rootEl),
   };
+}
+
+function openManageModal() {
+  const m = U.$("#accountsManageModal", rootEl);
+  if (m) m.hidden = false;
+}
+
+function closeManageModal() {
+  const m = U.$("#accountsManageModal", rootEl);
+  if (m) m.hidden = true;
+  exitEditMode();
 }
 
 function exitEditMode() {
@@ -505,10 +137,18 @@ function exitEditMode() {
   if (!f.form) return;
   f.form.reset();
   if (f.index) f.index.value = "";
-  if (f.title) f.title.textContent = "账号管理（写入机器人的 .env）";
-  if (f.submit) f.submit.textContent = "写入 .env";
-  if (f.cancel) f.cancel.hidden = true;
   if (f.note) f.note.hidden = true;
+}
+
+function startAddAccount() {
+  const f = manageForm();
+  if (!f.form) return;
+  exitEditMode();
+  if (f.title) f.title.textContent = "添加账号";
+  if (f.submit) f.submit.textContent = "添加账号";
+  openManageModal();
+  const email = f.form.elements.email;
+  if (email) email.focus();
 }
 
 function startEditAccount(index) {
@@ -529,14 +169,13 @@ function startEditAccount(index) {
 
   if (f.title) f.title.textContent = `编辑 ACCOUNT_${index}`;
   if (f.submit) f.submit.textContent = "保存修改";
-  if (f.cancel) f.cancel.hidden = false;
   if (f.note) {
     f.note.hidden = false;
     f.note.textContent =
       `正在编辑 ACCOUNT_${index}（${account.email}）：密码和 TOTP 留空＝不改动，已存的值不会被清除；` +
       `改邮箱会就地更新这一条，不会新增账号。`;
   }
-  f.form.scrollIntoView({ block: "nearest" });
+  openManageModal();
   if (password) password.focus();
 }
 
@@ -565,6 +204,7 @@ async function submitManagedAccount(form) {
       "success",
     );
     exitEditMode();
+    closeManageModal();
     await loadManage();
     offerRestart();
   } catch (e) {
@@ -590,136 +230,42 @@ async function removeManagedAccount(index) {
   }
 }
 
-function render(root) {
-  const container = U.$("#accountsContainer", root);
-  const accounts = accountsPayload?.accounts || [];
-
-  const liveByEmail = new Map(
-    (context?.status?.bot?.run?.accounts || []).map((la) => [la.email, la]),
-  );
-
-  const errEl = U.$("#accountsError", root);
-  if (errEl) {
-    errEl.hidden = !accountsPayload?.apiError;
-    if (accountsPayload?.apiError) errEl.textContent = accountsPayload.apiError;
-  }
-
-  if (!accounts.length) {
-    container.innerHTML = '<p class="empty-note" style="padding:1.25rem">No accounts configured or observed yet.</p>';
-    renderBatchToolbar(root);
-    return;
-  }
-
-  container.innerHTML = accounts.map(a => {
-    const live = liveByEmail.get(a.email) || null;
-    return renderAccountPanel(a, live);
-  }).join("");
-
-  container.querySelectorAll("button[data-run-account]").forEach((btn) =>
-    btn.addEventListener("click", () => {
-      const index = Number(btn.dataset.runAccount);
-      const account = accounts.find((a) => a.index === index);
-      if (account) runAccount(account);
-    }),
-  );
-
-  container.querySelectorAll("input[data-select-account]").forEach((input) =>
-    input.addEventListener("change", () => {
-      const index = Number(input.dataset.selectAccount);
-      if (input.checked) deselectedForBatch.delete(index);
-      else deselectedForBatch.add(index);
-      renderBatchToolbar(root);
-    }),
-  );
-
-  container.querySelectorAll("button[data-toggle-details]").forEach((btn) =>
-    btn.addEventListener("click", () => {
-      const key = btn.dataset.toggleDetails;
-      if (expandedAccounts.has(key)) expandedAccounts.delete(key);
-      else expandedAccounts.add(key);
-      render(root);
-    }),
-  );
-
-  container.querySelectorAll("button[data-arm-delete]").forEach((btn) =>
-    btn.addEventListener("click", () => {
-      deleteArmed.add(btn.dataset.armDelete);
-      render(root);
-    }),
-  );
-
-  container.querySelectorAll("button[data-cancel-delete]").forEach((btn) =>
-    btn.addEventListener("click", () => {
-      deleteArmed.delete(btn.dataset.cancelDelete);
-      render(root);
-    }),
-  );
-
-  container.querySelectorAll("button[data-confirm-delete]").forEach((btn) =>
-    btn.addEventListener("click", () => {
-      const key = btn.dataset.confirmDelete;
-      const account = accounts.find((a) => a.key === key);
-      if (account) deleteAccount(account);
-    }),
-  );
-
-  renderBatchToolbar(root);
-}
-
 export default {
   id: "accounts",
   label: "Accounts",
   interval: 10000,
 
-  // The batch button's enabled state depends on the Control API being reachable, and that is
-  // unknown at mount - the first status arrives a moment later. The status stream is what
-  // teaches us that (app.js applyState -> view.onState), so repaint here. Without this the only
-  // repaint was the router's 10s interval, so "Run selected" stayed greyed out for up to 10
-  // seconds each time the accounts tab was opened (measured 10.2s; ~1s after this hook).
-  onState() {
-    this.redraw();
-  },
-
-  // Also reached on theme/resize repaints (app.js redrawActive); guarded so a no-op costs nothing.
-  redraw() {
-    if (!rootEl || !rootEl.isConnected) return;
-    const runBtn = rootEl.querySelector("#accountsRunSelected");
-    if (!runBtn) return;
-    const { usable, running } = controlState();
-    const count = selectableAccounts().filter((a) => isBatchSelected(a.index)).length;
-    const wantDisabled = !usable || running || batchRunning || count === 0;
-    if (runBtn.disabled !== wantDisabled) renderBatchToolbar(rootEl);
-  },
-
   mount(root, ctx) {
     rootEl = root;
     context = ctx;
     root.innerHTML = `
-      <p class="notice notice--warn" id="accountsError" hidden></p>
-      <div class="panel batch-select-box" id="accountsBatchToolbar">
-          <div class="batch-select-header">
-              <h2 class="batch-select-title">Batch run</h2>
-              <div class="batch-select-controls">
-                  <label class="check">
-                      <input type="checkbox" id="accountsSelectAll">
-                      <span>Select all</span>
-                  </label>
-                  <span class="hint" id="accountsSelectedCount">0/0 selected</span>
-                  <button type="button" class="btn btn-primary btn-small" id="accountsRunSelected" disabled>Run selected</button>
+      <div class="card" id="accountsManageBox">
+          <div class="card-h">
+              <div class="card-ic vio">${icon("sliders", "i sm")}</div>
+              <div><div class="card-title" id="accountsManageTitle">账号管理（写入机器人的 .env）</div></div>
+              <div class="card-tools">
+                  <button type="button" class="btn btn-small" id="accountsManageReload">重新读取</button>
+                  <button type="button" class="btn btn-primary btn-small" id="accountsManageAdd">添加账号</button>
               </div>
           </div>
-      </div>
-      <div id="accountsContainer">
-          <p class="empty-note" style="padding:1.25rem">Loading accounts configuration details&hellip;</p>
+          <div class="card-b">
+              <p class="hint" id="accountsManageHint">正在读取机器人的 .env …</p>
+              <div id="accountsManageList"></div>
+          </div>
       </div>
 
-      <div class="panel" id="accountsManageBox" style="margin-top: 1.5rem;">
-          <div class="panel-head">
-              <h2 id="accountsManageTitle">账号管理（写入机器人的 .env）</h2>
-          </div>
-          <p class="hint" id="accountsManageHint">正在读取机器人的 .env …</p>
-          <p class="hint" id="accountsManageEditNote" hidden></p>
-          <form class="form" id="accountsManageForm" autocomplete="off" hidden>
+      <p class="hint" style="margin-top: 1.5rem;">账号保存在机器人的 <code>.env</code>（<code>ACCOUNT_N_*</code>），写入时只改这几行，
+      注释和其他设置原样保留，改前会备份一份 <code>.env.bak</code>。
+      控制 API 会显示完整邮箱，但从不回传密码、恢复邮箱、TOTP 密钥或代理凭据——本页面写入后也不回显这些值。</p>
+
+      <div class="modal-mask" id="accountsManageModal" hidden>
+          <div class="modal" role="dialog" aria-modal="true" aria-labelledby="accountsManageModalTitle">
+              <div class="modal-h">
+                  <div class="card-title" id="accountsManageModalTitle">添加账号</div>
+                  <button type="button" class="modal-x" id="accountsManageModalClose" aria-label="关闭">&times;</button>
+              </div>
+              <p class="hint" id="accountsManageEditNote" hidden></p>
+              <form class="form" id="accountsManageForm" autocomplete="off">
               <input type="hidden" name="index" value="">
               <div class="field-grid">
                   <label class="field field-item">邮箱
@@ -748,30 +294,13 @@ export default {
                   </label>
               </div>
               <div class="form-actions">
-                  <button type="submit" class="btn btn-primary btn-small" id="accountsManageSubmit">写入 .env</button>
-                  <button type="button" class="btn btn-small" id="accountsManageCancel" hidden>取消编辑</button>
-                  <button type="button" class="btn btn-small" id="accountsManageReload">重新读取</button>
+                  <button type="submit" class="btn btn-primary btn-small" id="accountsManageSubmit">添加账号</button>
+                  <button type="button" class="btn btn-small" id="accountsManageCancel">取消</button>
               </div>
           </form>
-          <div id="accountsManageList"></div>
+          </div>
       </div>
-
-      <p class="hint" style="margin-top: 1.5rem;">账号保存在机器人的 <code>.env</code>（<code>ACCOUNT_N_*</code>），写入时只改这几行，
-      注释和其他设置原样保留，改前会备份一份 <code>.env.bak</code>。
-      控制 API 会显示完整邮箱，但从不回传密码、恢复邮箱、TOTP 密钥或代理凭据——本页面写入后也不回显这些值。</p>
     `;
-    mounted = true;
-
-    U.$("#accountsSelectAll", root).addEventListener("change", (e) => {
-      const configured = selectableAccounts();
-      if (e.target.checked) deselectedForBatch.clear();
-      else configured.forEach((a) => deselectedForBatch.add(a.index));
-      render(root);
-    });
-
-    U.$("#accountsRunSelected", root).addEventListener("click", () => {
-      runSelectedAccounts();
-    });
 
     U.$("#accountsManageForm", root).addEventListener("submit", (e) => {
       e.preventDefault();
@@ -779,19 +308,21 @@ export default {
     });
 
     U.$("#accountsManageReload", root).addEventListener("click", () => loadManage(root));
-    U.$("#accountsManageCancel", root).addEventListener("click", () => exitEditMode());
+    U.$("#accountsManageCancel", root).addEventListener("click", () => closeManageModal());
+    U.$("#accountsManageAdd", root).addEventListener("click", () => startAddAccount());
+    U.$("#accountsManageModalClose", root).addEventListener("click", () => closeManageModal());
+    const mask = U.$("#accountsManageModal", root);
+    mask.addEventListener("click", (e) => {
+      if (e.target === mask) closeManageModal();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !mask.hidden) closeManageModal();
+    });
     loadManage(root);
   },
 
+  // .env 内容不会自己变 —— 本页没有需要轮询的东西，refresh 只记下上下文。
   async refresh(ctx) {
     context = ctx;
-    accountsPayload = await cached("accounts", ctx.api.accounts, 5000);
-    this.redraw(ctx);
   },
-
-  redraw(ctx) {
-    context = ctx || context;
-    if (!mounted || !accountsPayload) return;
-    render(rootEl);
-  }
 };

@@ -1,4 +1,5 @@
 import * as U from "../util.js";
+import { icon } from "../icons.js";
 
 const PRESETS = [
   ["Daily at 09:00", "0 9 * * *"],
@@ -155,7 +156,7 @@ function renderAccountExclusions() {
     .map(
       (account) => `<label class="check check--row">
                 <input type="checkbox" data-exclude-account="${account.index}" ${excluded.has(account.index) ? "checked" : ""}>
-                <span>Exclude <strong>ACCOUNT_${account.index}</strong> \u2014 ${U.escapeHtml(account.email)}</span>
+                <span>${U.escapeHtml(account.email)}</span>
             </label>`,
     )
     .join("");
@@ -191,16 +192,18 @@ export default {
   mount(root, ctx) {
     rootEl = root;
     root.innerHTML = `
-            <section class="panel" aria-labelledby="sched-heading">
-                <div class="panel-head">
-                    <h2 id="sched-heading">Automatic runs</h2>
-                    <span class="panel-sub">Two schedulers are available &mdash; pick the one that fits your setup</span>
+            <section class="card" aria-labelledby="sched-heading">
+                <div class="card-h">
+                    <div class="card-ic">${icon("cal", "i sm")}</div>
+                    <div><div class="card-title" id="sched-heading">Automatic runs</div><div class="card-sub">Two schedulers are available &mdash; pick the one that fits your setup</div></div>
+                    <div class="card-tools">
+                        <div class="seg" id="schedTargetToggle" role="radiogroup" aria-label="Scheduler location">
+                            <button type="button" class="seg-btn seg-btn--active" id="schedTargetLocal" data-target="local" aria-pressed="true">${U.escapeHtml(TARGET_LABEL.local)}</button>
+                            <button type="button" class="seg-btn" id="schedTargetRemote" data-target="remote" aria-pressed="false" hidden>${U.escapeHtml(TARGET_LABEL.remote)}</button>
+                        </div>
+                    </div>
                 </div>
-
-                <div class="seg" id="schedTargetToggle" role="radiogroup" aria-label="Scheduler location">
-                    <button type="button" class="seg-btn seg-btn--active" id="schedTargetLocal" data-target="local" aria-pressed="true">${U.escapeHtml(TARGET_LABEL.local)}</button>
-                    <button type="button" class="seg-btn" id="schedTargetRemote" data-target="remote" aria-pressed="false" hidden>${U.escapeHtml(TARGET_LABEL.remote)}</button>
-                </div>
+                <div class="card-b">
                 <p class="hint" id="schedTargetNote"></p>
                 <p class="empty-note chart-empty" id="schedDualWarning" hidden>
                     &#9888; Both schedulers are currently enabled &mdash; runs may double-fire. Disable one of them below.
@@ -264,10 +267,15 @@ export default {
                     persists, check that the bot's Control API is reachable and API_ALLOW_SCHEDULE_WRITE is set if you
                     want to edit it from here.
                 </p>
+                </div>
             </section>
 
-            <section class="panel" aria-labelledby="sched-state-heading">
-                <div class="panel-head"><h2 id="sched-state-heading">Current state</h2></div>
+            <section class="card" aria-labelledby="sched-state-heading">
+                <div class="card-h">
+                    <div class="card-ic ok">${icon("clock", "i sm")}</div>
+                    <div><div class="card-title" id="sched-state-heading">Current state</div></div>
+                </div>
+                <div class="card-b">
                 <dl class="kv">
                     <div><dt>Next run</dt><dd id="schedNext">\u2013</dd></div>
                     <div><dt>Last triggered</dt><dd id="schedLast">\u2013</dd></div>
@@ -278,6 +286,7 @@ export default {
                 <p class="hint">Times are evaluated in the scheduler&rsquo;s own timezone (dashboard: its <code>TZ</code>;
                 bot container: its own <code>TZ</code>). If a scheduler's host was offline, the local scheduler applies
                 its missed-run policy at startup &mdash; the container scheduler simply didn&rsquo;t fire.</p>
+                </div>
             </section>`;
 
     const cronInput = U.$("#schedCron", root);

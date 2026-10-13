@@ -42,7 +42,7 @@ function emptyState(container, message) {
 export function lineChart(
   container,
   points,
-  { emptyMessage = "No data yet." } = {},
+  { emptyMessage = "No data yet.", signed = false, ariaLabel = "Point total over time" } = {},
 ) {
   if (!points || points.length === 0)
     return emptyState(container, emptyMessage);
@@ -69,10 +69,11 @@ export function lineChart(
     .join(" ");
   const area = `${line} L${coords[coords.length - 1][0].toFixed(1)},${(height - PAD.bottom).toFixed(1)} L${coords[0][0].toFixed(1)},${(height - PAD.bottom).toFixed(1)} Z`;
 
+  const fmt = signed ? fmtSigned : fmtNumber;
   const dots = points
     .map((p, i) => {
       const [x, y] = coords[i];
-      const title = `${p.label || p.key}: ${fmtNumber(p.value)} points`;
+      const title = `${p.label || p.key}：${fmt(p.value)} 积分`;
       return `<circle class="chart-dot" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3"><title>${escapeAttr(title)}</title></circle>`;
     })
     .join("");
@@ -92,13 +93,67 @@ export function lineChart(
 
   container.innerHTML = `
         <svg class="chart" viewBox="0 0 ${width} ${height}" width="100%" height="${height}" role="img"
-             aria-label="Point total over time">
+             aria-label="${escapeAttr(ariaLabel)}">
             ${grid}
             <path class="chart-area" d="${area}" />
-            <path class="chart-line" d="${line}" />
+            <path class="chart-line" pathLength="1" d="${line}" />
+            <line class="chart-cursor" y1="${PAD.top}" y2="${height - PAD.bottom}" hidden />
             ${dots}
             ${labels}
-        </svg>`;
+        </svg>
+        <div class="chart-tip" hidden></div>`;
+
+  // 悬停交互（用户：原来鼠标划过只有曲线，看不到各个点的数字）——
+  // 竖向虚线光标吸附最近点、该点放大高亮、浮动提示框显示日期与数值。
+  const svg = container.querySelector("svg");
+  const tip = container.querySelector(".chart-tip");
+  const cursor = container.querySelector(".chart-cursor");
+  const dotEls = [...svg.querySelectorAll(".chart-dot")];
+  let activeDot = null;
+
+  svg.addEventListener("mousemove", (e) => {
+    const rect = svg.getBoundingClientRect();
+    if (!rect.width) return;
+    const px = ((e.clientX - rect.left) / rect.width) * width;
+    const ratio = (px - PAD.left) / innerW;
+    const i = Math.max(
+      0,
+      Math.min(points.length - 1, Math.round(ratio * (points.length - 1))),
+    );
+    const [x, y] = coords[i];
+
+    cursor.setAttribute("x1", x.toFixed(1));
+    cursor.setAttribute("x2", x.toFixed(1));
+    cursor.hidden = false;
+
+    if (activeDot) activeDot.classList.remove("chart-dot--active");
+    activeDot = dotEls[i] || null;
+    if (activeDot) activeDot.classList.add("chart-dot--active");
+
+    const p = points[i];
+    const label =
+      p.label ||
+      (p.key.length === 10
+        ? localDateLabel(p.key, { month: "short", day: "numeric" })
+        : p.key);
+    tip.innerHTML = `<span class="chart-tip-label">${escapeHtml(label)}</span><strong>${escapeHtml(fmt(p.value))} 积分</strong>`;
+    tip.hidden = false;
+    const leftPct = (x / width) * 100;
+    tip.style.left = `${leftPct}%`;
+    tip.style.top = `${(y / height) * 100}%`;
+    // 靠边的提示框改向内侧锚定，别甩出容器
+    tip.classList.toggle("chart-tip--left", leftPct > 78);
+    tip.classList.toggle("chart-tip--right", leftPct < 22);
+  });
+
+  svg.addEventListener("mouseleave", () => {
+    cursor.hidden = true;
+    tip.hidden = true;
+    if (activeDot) {
+      activeDot.classList.remove("chart-dot--active");
+      activeDot = null;
+    }
+  });
 }
 
 /**
@@ -127,7 +182,7 @@ export function barChart(
       const cx = PAD.left + slot * i + slot / 2;
       const y = yOf(b.value);
       const h = Math.max(b.value > 0 ? 2 : 0, baseY - y);
-      const title = `${localDateLabel(b.key, { weekday: "short", month: "short", day: "numeric" })}: ${fmtSigned(b.value)} points${b.sub ? ` (${b.sub})` : ""}`;
+      const title = `${localDateLabel(b.key, { weekday: "short", month: "short", day: "numeric" })}：${fmtSigned(b.value)} 积分${b.sub ? `（${b.sub}）` : ""}`;
       return `<rect class="chart-bar" x="${(cx - barW / 2).toFixed(1)}" y="${(baseY - h).toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" rx="2"><title>${escapeAttr(title)}</title></rect>`;
     })
     .join("");
@@ -226,7 +281,7 @@ export function buildHeatmapHtml(days) {
   // long the account has been running.
   const totalWeeks = HEATMAP_MIN_WEEKS;
 
-  // Collect Month Labels accurately calculating width mapping to `.heatmap-cell` (8px + 2px gap)
+  // Collect Month Labels accurately calculating width mapping to `.heatmap-cell` (10px + 2px gap)
   let monthWidths = [];
   let currentMonthSpan = 0;
   let lastMonth = -1;
@@ -276,11 +331,13 @@ export function buildHeatmapHtml(days) {
         key === todayStr ? "heatmap-today" : ""
       ].filter(Boolean).join(" ");
 
-      const title = entry
-        ? `${localDateLabel(key, { weekday: "long", month: "short", day: "numeric" })}\n+${fmtSigned(entry.gained)} pts\nTotal ${entry.lastTotal.toLocaleString()}`
+      // 提示直接出中文（用户：原生 title 里的 pts/Total 没翻译）；fmtSigned 自带 + 号，别再叠一个。
+      // 走 data-tip（共享动态气泡）而不是原生 title —— title 无法加动画，且会和气泡双弹
+      const tip = entry
+        ? `${localDateLabel(key, { weekday: "long", month: "short", day: "numeric" })}\n${fmtSigned(entry.gained)} 积分\n总计 ${entry.lastTotal.toLocaleString()}`
         : localDateLabel(key, { weekday: "long", month: "short", day: "numeric" });
 
-      gridHtml += `<div class="${cls}" title="${escapeAttr(title)}"></div>`;
+      gridHtml += `<div class="${cls}" data-tip="${escapeAttr(tip)}" aria-label="${escapeAttr(tip)}"></div>`;
     }
 
     gridHtml += "</div>";
@@ -292,10 +349,12 @@ export function buildHeatmapHtml(days) {
       monthWidths.push({ name: currentMonthName, span: currentMonthSpan });
   }
 
-  // Multiply length by week span (8px cell + 2px gap = 10px per mapped column)
+  // 列距与 style.css 的 .heatmap-week/.heatmap-cell 同步：10px 格 + 2px 缝 = 12px/列
+  // （用户：格子从 8px 加宽到 10px，月份行跟着拉宽，右侧不再那么空）
   let monthsHtml = '<div class="heatmap-months" style="display: flex; font-size: 0.65rem; color: var(--text-muted); margin-bottom: 4px; line-height: 1;">';
   for (const m of monthWidths) {
-      monthsHtml += `<div style="width: ${m.span * 10}px; flex-shrink: 0;">${escapeHtml(m.name)}</div>`;
+      // nowrap：月份标签永远横排 —— 最右的"10月"原来列宽不够被挤成"10/月"两行（用户点名）
+      monthsHtml += `<div style="width: ${m.span * 12}px; flex-shrink: 0; white-space: nowrap; overflow: visible;">${escapeHtml(m.name)}</div>`;
   }
   monthsHtml += '</div>';
 
@@ -326,7 +385,8 @@ export function buildAccumBarHtml(days, globalMaxGained, maxDays = null) {
       month: "short",
       day: "numeric",
     });
-    html += `<div class="accum-week-marker" title="Week of ${escapeAttr(label)}: ${fmtSigned(weekGained)} pts"></div>`;
+    const weekTip = escapeAttr(`${label} 当周\n${fmtSigned(weekGained)} 积分`);
+    html += `<div class="accum-week-marker" data-tip="${weekTip}" aria-label="${weekTip}"></div>`;
     weekGained = 0;
   };
 
@@ -346,7 +406,8 @@ export function buildAccumBarHtml(days, globalMaxGained, maxDays = null) {
       );
       if (missed >= 1) {
         const gapClass = missed === 1 ? " accum-gap--warn" : " accum-gap--bad";
-        html += `<div class="accum-gap${gapClass}" style="width:${missed * 16}px" title="Gap: ${missed} missed day${missed > 1 ? "s" : ""}"></div>`;
+        const gapTip = escapeAttr(`中断 ${missed} 天`);
+        html += `<div class="accum-gap${gapClass}" style="width:${missed * 16}px" data-tip="${gapTip}" aria-label="${gapTip}"></div>`;
       }
     }
 
@@ -363,8 +424,86 @@ export function buildAccumBarHtml(days, globalMaxGained, maxDays = null) {
     const opacity = (0.35 + 0.65 * (i / (len - 1 || 1))).toFixed(2);
     altToggle = !altToggle;
 
-    html += `<div class="accum-day ${altToggle ? "accum-day--a" : "accum-day--b"}${isToday ? " accum-day--today" : ""}" style="height:${heightPct}%;opacity:${opacity}" title="${escapeAttr(dateLabel)}${isToday ? " (today)" : ""}: ${fmtSigned(day.gained)} pts (total: ${day.lastTotal.toLocaleString()})"></div>`;
+    // 提示走 data-tip（共享动态气泡）而不是原生 title —— title 无法加动画，且会和气泡双弹。
+    // 内容上下两行：上行日期、下行积分（用户点名对齐热力图的两行结构）
+    const tip = escapeAttr(
+      `${dateLabel}${isToday ? "（今天）" : ""}\n${fmtSigned(day.gained)} 积分（总计 ${day.lastTotal.toLocaleString()}）`,
+    );
+    html += `<div class="accum-day ${altToggle ? "accum-day--a" : "accum-day--b"}${isToday ? " accum-day--today" : ""}" style="height:${heightPct}%;opacity:${opacity};--i:${i}" data-tip="${tip}" aria-label="${tip}"></div>`;
   }
 
   return html;
 }
+
+/* ============ 共享动态提示气泡（时间线积分条 / 热力点 / 中断标记 / 周标记） ============
+   这些元素反复 innerHTML 重渲，监听器一律走 document 级事件委托，不绑定到具体节点；
+   气泡懒建一个、跟随鼠标，进出带 淡入+上浮+回弹 动画（原生 title 做不到，已弃用）。 */
+let sharedTipEl = null;
+// 滚动抑制窗口：鼠标不动、只滚滚轮时，浏览器会在滚动后补发「合成 mousemove」
+// （光标下的内容变了），hide 完立刻又被它重新显示 —— 用户看到的「气泡不会消失」bug。
+// 滚动后 350ms 内禁止再显示，合成事件就落在窗口里；真实移动超出窗口后正常恢复。
+let tipSuppressUntil = 0;
+
+function positionSharedTip(x, y) {
+  const el = sharedTipEl;
+  const gap = 14;
+  let left = x + gap;
+  let top = y + gap + 4;
+  if (left + el.offsetWidth > window.innerWidth - 8)
+    left = x - el.offsetWidth - gap;
+  if (top + el.offsetHeight > window.innerHeight - 8)
+    top = y - el.offsetHeight - gap;
+  el.style.left = `${Math.max(4, left)}px`;
+  el.style.top = `${Math.max(4, top)}px`;
+}
+
+function showSharedTip(text, x, y) {
+  if (!text || performance.now() < tipSuppressUntil) return;
+  if (!sharedTipEl) {
+    sharedTipEl = document.createElement("div");
+    sharedTipEl.className = "chartTip--float";
+    sharedTipEl.setAttribute("aria-hidden", "true");
+    document.body.appendChild(sharedTipEl);
+  }
+  if (sharedTipEl.textContent !== text) sharedTipEl.textContent = text;
+  positionSharedTip(x, y);
+  sharedTipEl.classList.add("on");
+}
+
+function hideSharedTip() {
+  sharedTipEl?.classList.remove("on");
+}
+
+const tipTargetOf = (e) =>
+  e.target instanceof Element ? e.target.closest("[data-tip]") : null;
+
+document.addEventListener("mouseover", (e) => {
+  const t = tipTargetOf(e);
+  if (t) showSharedTip(t.getAttribute("data-tip"), e.clientX, e.clientY);
+});
+document.addEventListener("mousemove", (e) => {
+  if (!sharedTipEl || !sharedTipEl.classList.contains("on")) return;
+  const t = tipTargetOf(e);
+  if (!t) {
+    // 目标被重渲移除或移出热点区：下一段 mousemove 落到别的元素上时收掉
+    hideSharedTip();
+    return;
+  }
+  showSharedTip(t.getAttribute("data-tip"), e.clientX, e.clientY);
+});
+document.addEventListener("mouseout", (e) => {
+  if (!tipTargetOf(e)) return;
+  const to =
+    e.relatedTarget instanceof Element
+      ? e.relatedTarget.closest("[data-tip]")
+      : null;
+  if (to !== tipTargetOf(e)) hideSharedTip();
+});
+window.addEventListener(
+  "scroll",
+  () => {
+    tipSuppressUntil = performance.now() + 350;
+    hideSharedTip();
+  },
+  true,
+);
