@@ -1492,10 +1492,6 @@ tbody tr:hover {
   margin: 0;
   font-size: 1rem;
 }
-.hero-panel-subtitle {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-}
 
 .hero-layout {
   display: flex;
