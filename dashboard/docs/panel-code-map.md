@@ -302,8 +302,8 @@ cached("accounts", ctx.api.accounts, 5000),   // → /api/accounts
 |---|---|---|
 | `accounts` | 账号生命周期事件 | `upsertAccountStart` / `upsertAccountEnd` / `upsertAccountError` / `upsertStreakProtection` / `setAccountTasks` / `markAccountInterrupted` / `markAccountCompletedWithoutResult` |
 | `account_history` | **只有两个事件**：`account-end`（`store.js:668`）和 `account-balance-read`（`store.js:978`） | `insertHistory`（`INSERT OR IGNORE`，靠秒级唯一索引去重，重放不会重复） |
-| `activity` | 每个事件都经 `_pushActivity` → `insertActivity` | 裁剪走 `countActivity` / `pruneActivity` / `pruneGenericActivity` |
-| `runs` | 运行级事件 | `insertRunStart` / `closeRunFull` / `insertOrphanRunEnd` |
+| `activity` | **只有少数事件写活动**：账号边界（`account-start` / `account-end` / `account-error` / `account-delay`）、运行起止、登录提示、`cluster-worker-exit` 才经 `_pushActivity` → `insertActivity`。**不是每个事件都写** —— 实测一次 410 分钟的运行只落了 9 条（`account-start`×3、`account-end`×2、`account-delay`×2、`account-error`×1、`run-end`×1）。所以**不能拿 activity 判断"运行还活着"**：单账号耗时 113~156 分钟是常态，90 分钟没有活动行是正常的。看门狗的判据是 `apply()` 里记的 `_lastEventTs`（每行日志都过手），见 `_tryCloseStaleNoActivityRun` | 裁剪走 `countActivity` / `pruneActivity` / `pruneGenericActivity` |
+| `runs` | 运行级事件 | `insertRunStart` / `closeRunFull` / `insertOrphanRunEnd`。**`status='stalled'` 的含义是"没有任何证据就放弃"**（看门狗/自动闭合抢先把还在跑的运行关掉），不是崩溃；`interrupted` / `stopped` / `crashed` 都有进程退出这类真实证据。RUN-END 到达而 `findRunningRun` 为空时，会先回头复用 6 小时内被关掉的 `stalled` 行（`RUN_END_REUSE_WINDOW_MS`），真没有才插 `start_ts` 为 NULL 的孤儿 —— 不这样做，同一次运行会出现两行（实测 2026-10-10）。回归测试：`node tools/test-store-watchdog.mjs` |
 | `meta` | 杂项键值 | `_writeMeta` |
 
 注意 `account-balance-read` 只写一条余额快照（`points=N`、`gained=null`），

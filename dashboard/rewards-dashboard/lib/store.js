@@ -54,6 +54,14 @@ const ZERO_START_STALE_MS = 5 * 60 * 1000;
 // account, is well beyond any gap seen in normal operation.
 const RUN_NO_ACTIVITY_STALE_MS = 90 * 60 * 1000;
 
+// RUN-END 到达时若找不到 'running' 行，允许回头复用这么久之前被"无证据闭合"的那一行。
+// 场景：看门狗/自动闭合抢先把还在跑的运行关掉（实测 2026-10-10 那次被误判成 stalled，
+// 比真 RUN-END 早 11.5 分钟），真 RUN-END 到达时 findRunningRun 已为空，于是另建了一行
+// start_ts 为 null 的孤儿 —— 同一次运行在运行记录页出现两遍。
+// 只复用 status='stalled' 的行：那是"没有任何证据就放弃"的状态，最可能判错；
+// interrupted/stopped/crashed 都有进程退出这类真实证据，不该被 RUN-END 覆盖。
+const RUN_END_REUSE_WINDOW_MS = 6 * 60 * 60 * 1000;
+
 // How often the zero-start watchdog checks, independent of incoming events -
 // needed because a run stuck in the zero-start state produces no further
 // log lines at all to trigger a check from apply().
@@ -205,6 +213,10 @@ class Store {
     // Ephemeral (not persisted) - transient "waiting between accounts" state
     // is only meaningful while live, unlike everything else in this class.
     this._pendingDelay = null;
+    // 最后一次真正过手的事件时间戳（毫秒）。看门狗用它判断"运行还活着" —— 见
+    // _tryCloseStaleNoActivityRun 里为什么不能用 activity 表。不持久化：面板重启后
+    // 由日志补录重新灌满，而补录进来的 ts 就是日志行的真实时间，正是想要的。
+    this._lastEventTs = null;
 
     // Completion evidence for the currently running process. Deliberately
     // NOT persisted - describes evidence from the live log stream only. If
@@ -355,6 +367,17 @@ class Store {
       findRunningRun: this.db.prepare(
         `SELECT id, start_ts as startTs, total_accounts as totalAccounts FROM runs WHERE status = 'running' ORDER BY start_ts DESC LIMIT 1`,
       ),
+      // 被"无证据闭合"的最近几行。RUN-END 到达但找不到 running 行时，回头看看是不是
+      // 刚被看门狗/自动闭合抢先关掉了 —— 那种情况下 RUN-END 才是权威数据，应当更新
+      // 那一行，而不是另建一行孤儿（见 run-end 分支与 RUN_END_REUSE_WINDOW_MS）。
+      // 只取 stalled：interrupted/stopped/crashed 都有进程退出这类真实证据。
+      // 行数极少（历史上 1 行），取 20 条到 JS 里比时间戳保险 —— runs 表里的
+      // ISO 字符串精度不统一（有的 3 位小数，有的 12 位），字符串比较不可靠。
+      recentStalledRuns: this.db.prepare(`
+                SELECT id, start_ts as startTs, end_ts as endTs
+                FROM runs WHERE status = 'stalled'
+                ORDER BY end_ts DESC LIMIT 20
+            `),
       accountsStartedSince: this.db.prepare(`
                 SELECT COUNT(DISTINCT email) as n
                 FROM activity
@@ -578,22 +601,38 @@ class Store {
   }
 
   // General safety net for a run that hung PARTWAY through - covers the
-  // zero-start case too (no activity since start is a special case of "no
-  // activity for a long time"), but is deliberately much more generous
+  // zero-start case too (no output since start is a special case of "no
+  // output for a long time"), but is deliberately much more generous
   // (RUN_NO_ACTIVITY_STALE_MS) since a run that already has accounts in
   // flight can have legitimate bursty gaps that a brand-new run can't.
+  //
+  // 判据是 apply() 里记的 _lastEventTs（最后一条真正过手的事件），**不是 activity 表**。
+  // activity 只在账号边界等少数事件落库 —— 实测一次 410 分钟的运行只落了 9 条
+  // （account-start×3、account-end×2、account-delay×2、account-error×1、run-end×1），
+  // 而实测单账号耗时 113~156 分钟是常态。拿 activity 判存活就是必然误判：
+  // 2026-10-10 那次运行被判成 stalled（比真 RUN-END 早 11.5 分钟），真 RUN-END 随后
+  // 找不到 running 行，又另建了一行 start_ts 为 null 的孤儿，同一次运行显示两遍。
+  // 上面那句 "produced ABSOLUTELY NOTHING" 本来就是判据的意图，现在实现才和它一致。
   //
   // Explicitly does NOT fire while the run is waiting on a still-open
   // manual login-approval prompt - that can legitimately take a long time
   // (this is exactly why RUN_STALE_BACKSTOP_MS is 20h instead of something
   // short), and is a real, expected reason for silence rather than a hang.
+  //
+  // 前提：accountDelay 之类的"已知在等待"远小于 RUN_NO_ACTIVITY_STALE_MS。实测本机
+  // 最长的间隔等待是 240 秒，余量很大；若哪天配了两小时以上的 accountDelay，这里会误判，
+  // 那时需要再加一道按 event.seconds 计算的"已知在等待"豁免。
   _tryCloseStaleNoActivityRun() {
     const running = this.stmts.findRunningRun.get();
     if (!running) return;
 
-    const lastActivity = this.stmts.lastActivitySince.get(running.startTs);
-    const lastTs = (lastActivity && lastActivity.ts) || running.startTs;
-    const ageMs = Date.now() - Date.parse(lastTs);
+    // 首选实时水位；拿不到时（刚构造、还没过手任何事件）退回 activity 的旧判据。
+    let lastMs = this._lastEventTs;
+    if (lastMs == null) {
+      const lastActivity = this.stmts.lastActivitySince.get(running.startTs);
+      lastMs = Date.parse((lastActivity && lastActivity.ts) || running.startTs);
+    }
+    const ageMs = Date.now() - lastMs;
     if (!Number.isFinite(ageMs) || ageMs < RUN_NO_ACTIVITY_STALE_MS) return;
 
     const pendingApproval = this.stmts.lastLoginPromptKindSince.get(running.startTs);
@@ -639,6 +678,13 @@ class Store {
       this._lastTs = event.ts;
       this._writeMeta("lastTs", event.ts);
     }
+
+    // 看门狗要的"活着"证据：最后一条真正过手的事件。每一行日志都会被 parseLine
+    // 变成事件，所以这条水位 ≈ 最后一行日志的时间 —— 这才是"运行还在产出东西"。
+    // 不要用 activity 表：它只在账号边界等少数事件落库（实测 410 分钟才 9 条），
+    // 会把正在正常跑的运行判死（见 _tryCloseStaleNoActivityRun）。
+    const eventMs = Date.parse(event.ts);
+    if (Number.isFinite(eventMs)) this._lastEventTs = eventMs;
 
     let changed = true;
 
@@ -916,15 +962,50 @@ class Store {
             );
           }
         } else {
-          this.stmts.insertOrphanRunEnd.run(
-            event.ts,
-            event.ts,
-            event.accountsProcessed,
-            event.totalGained,
-            event.oldTotal,
-            event.newTotal,
-            event.runtimeMin,
-          );
+          // 没有 running 行。两种情况要分开：
+          //  (a) 确实没有运行在跑 —— RUN-END 是野的，按原样插一行孤儿；
+          //  (b) 这一轮的运行**刚被无证据地抢先关掉**（看门狗/自动闭合），
+          //      此时 RUN-END 才是权威数据，应当更新那一行。
+          // 以前不区分，一律插孤儿 —— 于是同一次运行出现两行：一行 stalled，
+          // 一行 start_ts 为 null 的 done（实测 2026-10-10）。
+          const nowMs = Date.parse(event.ts);
+          const reusable = Number.isFinite(nowMs)
+            ? this.stmts.recentStalledRuns.all().find((r) => {
+                const startMs = Date.parse(r.startTs);
+                const endMs = Date.parse(r.endTs);
+                return (
+                  Number.isFinite(startMs) &&
+                  Number.isFinite(endMs) &&
+                  startMs <= nowMs &&
+                  endMs <= nowMs + 1000 &&
+                  nowMs - endMs <= RUN_END_REUSE_WINDOW_MS
+                );
+              })
+            : null;
+          if (reusable) {
+            this.stmts.closeRunFull.run(
+              "done",
+              event.ts,
+              event.accountsProcessed,
+              event.totalGained,
+              event.oldTotal,
+              event.newTotal,
+              event.runtimeMin,
+              0,
+              null,
+              reusable.id,
+            );
+          } else {
+            this.stmts.insertOrphanRunEnd.run(
+              event.ts,
+              event.ts,
+              event.accountsProcessed,
+              event.totalGained,
+              event.oldTotal,
+              event.newTotal,
+              event.runtimeMin,
+            );
+          }
         }
         this._resetCompletionEvidence();
         this._pushActivity(event);
