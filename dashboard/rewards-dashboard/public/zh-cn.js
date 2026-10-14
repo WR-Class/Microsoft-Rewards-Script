@@ -91,7 +91,7 @@ const EXACT = {
   "Combined balance": "合计余额",
   "Change in points since last check-in from all sources":
     "自上次检查以来各来源的积分变化",
-  "Points earned last run": "上次运行获得积分",
+  "Points earned today": "今日获得积分",
   "Last run": "上次运行",
   "Last run duration": "上次运行耗时",
   "Run in progress": "运行进行中",

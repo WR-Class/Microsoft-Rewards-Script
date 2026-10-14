@@ -128,10 +128,37 @@ function renderStats(root, status) {
   const combined = accounts.reduce((sum, a) => sum + (a.lastPoints || 0), 0);
   const sched = activeSchedule(status);
 
+  // 今日获得 = 各账号"今天"的余额增量之和。用的是与账号行、积分条、热力图**完全同一套**
+  // 计算（U.bucketByDay，把余额变化归到观测到的那一天），所以这个数与鼠标悬停在某个
+  // 积分点/积分条上看到的那个 +积分 永远是同一口径，两者相加必然自洽。
+  //
+  // 与它替换掉的"上次运行获得积分"的区别：那个数只统计一次运行覆盖到的账号，10 个号里
+  // 有 1 个出错、下次只补跑那 1 个，合计就会从"10 个号"塌成"1 个号"而忽大忽小。
+  // 这个数只跟账号今天的余额涨了多少有关：跑几次、哪个号中途出错、错过多少轮，都不影响。
+  //
+  // 今天还没有任何账号被观测到 -> 显示 –（不知道），而不是 0。
+  const todayKey = U.tzDayKey(new Date());
+  const histories = accountsPayload?.histories || {};
+  let todayGained = 0;
+  let todayObserved = 0;
+  for (const a of accounts) {
+    const bucket = U.bucketByDay(histories[a.key] || []).find((d) => d.dayKey === todayKey);
+    if (!bucket) continue;
+    todayGained += bucket.gained;
+    todayObserved += 1;
+  }
+
   U.$("#statGrid", root).innerHTML = [
     statCard("statAccounts", U.fmtNumber(accounts.length), "profiles", "Accounts tracked", "", "users"),
     statCard("statCombined", U.fmtNumber(combined), "points", "Combined balance", "", "bars"),
-    statCard("statLastGained", lastRun ? U.fmtSigned(lastRun.totalGained) : "\u2013", "points", "Points earned last run", "", "bolt"),
+    statCard(
+      "statTodayGained",
+      todayObserved ? U.fmtSigned(todayGained) : "\u2013",
+      "points",
+      "Points earned today",
+      "",
+      "bolt",
+    ),
     statCard(
       "statLastRun",
       anyRunning ? "Running now" : lastRun ? U.fmtRelative(lastRun.endTs || lastRun.startTs) : "\u2013",
