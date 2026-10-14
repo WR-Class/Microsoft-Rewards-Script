@@ -1,6 +1,5 @@
-:: 运行脚本
-:: 更改下方目录为项目目录
+@echo off
+:: 运行脚本：先切到本文件所在目录，再启动
 chcp 65001 >nul
-%~d0
-cd %~dp0
+cd /d "%~dp0"
 call npm start
