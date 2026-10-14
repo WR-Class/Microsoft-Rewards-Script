@@ -110,7 +110,7 @@ if (process.argv.includes("--live")) {
   const live = sumTodayGained(accounts, histories);
   console.log(
     `    实算（${base}）：今天 ${live.todayKey}，${live.observed}/${accounts.length} 个账号有观测，` +
-      `合计 ${live.gained} -> 卡片显示 ${live.observed ? `+${live.gained}` : "–"}`,
+      `合计 ${live.gained} -> 卡片显示 ${live.observed ? live.gained.toLocaleString() : "–"}`,
   );
   for (const a of accounts) {
     const one = sumTodayGained([a], histories);
