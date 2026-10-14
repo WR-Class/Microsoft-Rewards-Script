@@ -149,7 +149,7 @@
 | `index.html` | 外壳 |
 | `app.js` | 启动、路由、把 `ctx`（上下文）传给各视图 |
 | `api.js` | `api`（端点对象）、`cached(key, fetcher, ttlMs)`（缓存层）、`invalidate(key)` |
-| `util.js` | 工具（`escapeHtml`、`tzDayKey` 等） |
+| `util.js` | 工具（`escapeHtml`、`tzDayKey` 等）+ **按天分桶与"今日获得"的计算**：`bucketByDay`（把余额差归到观测到的那天）、`sumTodayGained`（把各账号今天那一格加起来 —— 总览页卡片上那个数就是它）。回归测试：`node tools/test-today-gained.mjs` |
 | `charts.js` | 图表构建器：`lineChart`、`barChart`、`buildHeatmapHtml`、**`buildAccumBarHtml`** |
 | `views/overview.js` | **总览页（含「账户总览」那一块）** |
 | `views/runs.js` | 运行历史页 |
@@ -367,8 +367,12 @@ cached("accounts", ctx.api.accounts, 5000),   // → /api/accounts
   只有 `schedule.js:357` 传 `0` → 服务端 `historyDays=0` → `since=null` → **一份历史都不取**
   （调度页不需要）。
 - 服务端（`server.js:549-563`）把参数夹在 `0..3650`，**参数缺失时**用 365。
-- 热力图吃的是这份历史的按天分桶：`overview.js:223` → `U.bucketByDay(histories[email])`
+- 热力图吃的是这份历史的按天分桶：`overview.js:239` → `U.bucketByDay(histories[email])`
   （`public/util.js:198`），再按 `weekKey` 排成周列。**内容上限就是这 365 天。**
+- 卡片上的「今日获得积分」走的是**同一个分桶**：`overview.js:140` → `U.sumTodayGained`
+  （`public/util.js:235`）= 各账号"今天"那一格相加。它跟"上次运行获得积分"不是一回事：
+  后者只统计一次运行覆盖到的账号，某个号出错重跑就会让合计从 10 个号塌成 1 个号。
+  回归测试：`node tools/test-today-gained.mjs`（加 `--live` 再对面板实算一次）。
 - 累积条那个窗口是**另一个常量**：`charts.js:155` 的 `ACCUM_WINDOW_DAYS = 84`（约 12 周），
   在 `buildAccumBarHtml` 里按 `todayKey − 84` 截断。**84 和 365 是两回事。**
 
@@ -417,7 +421,12 @@ cached("accounts", ctx.api.accounts, 5000),   // → /api/accounts
 3. **`activity` 表的裁剪阈值数值** —— 知道有 `MAX_ACTIVITY_ROWS` / `MAX_GENERIC_ROWS`
    两个上限和对应的 `prune*` 语句，但没读这两个常量的具体数字。
 4. **`/api/summary` 的 `accounts` / `runs` / `activity` 三个字段前端是否都在用** ——
-   `overview.js:575-578` 同时取了 `summary` 和 `accounts` 两个接口，值得确认有没有重复取数。
+   `overview.js:624-627` 同时取了 `summary` 和 `accounts` 两个接口，值得确认有没有重复取数。
+   **已查实一件事（2026-10-14）**：`/api/summary` 的 `accounts[]` **没有 `key` 字段**
+   （只有 `email` / `userName` / …），而 `/api/accounts` 的 `histories` 是以 email 为键的。
+   拿 summary 的账号去查 histories **不报错**，只是全部落空 —— 「今日获得积分」卡片曾因此
+   显示成 `–`（实测命中 0/10）。要跨这两个接口 join，只能按 `email` 自己配对；
+   更省事的做法是两边都取 `/api/accounts`（账号行与那张卡片现在都是这么取的）。
 
 ---
 

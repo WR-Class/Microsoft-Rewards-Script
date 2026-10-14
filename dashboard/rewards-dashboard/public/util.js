@@ -224,6 +224,27 @@ export function bucketByDay(history) {
   return [...days.values()].sort((a, b) => a.dayKey.localeCompare(b.dayKey));
 }
 
+// "今天一共获得多少"：把每个实体的今日增量加起来。卡片上那个数就是它。
+//
+// 账号名单和它的历史**必须来自同一个载荷**：不同接口对同一个账号可能用不同的身份字段
+// （实测 /api/summary 的账号对象没有 key，只有 email/userName/…）。拿 undefined 当键查表
+// 不会报错，只是全部落空 —— 卡片于是显示成 –。这个 bug 真发生过，所以把名单当参数收进来，
+// 由调用方保证同源，并由 tools/test-today-gained.mjs 把陷阱固定成断言。
+//
+// observed = "今天被观测到的实体数"。0 的意思是"不知道"，调用方应当显示 –，而不是 +0。
+export function sumTodayGained(accounts, histories, now = new Date()) {
+  const todayKey = tzDayKey(now);
+  let gained = 0;
+  let observed = 0;
+  for (const a of accounts || []) {
+    const bucket = bucketByDay((histories || {})[a.key] || []).find((d) => d.dayKey === todayKey);
+    if (!bucket) continue;
+    gained += bucket.gained;
+    observed += 1;
+  }
+  return { todayKey, gained, observed };
+}
+
 // toooooooooooooooast
 
 let toastHost = null;

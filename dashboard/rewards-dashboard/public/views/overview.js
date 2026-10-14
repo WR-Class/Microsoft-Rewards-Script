@@ -128,37 +128,23 @@ function renderStats(root, status) {
   const combined = accounts.reduce((sum, a) => sum + (a.lastPoints || 0), 0);
   const sched = activeSchedule(status);
 
-  // 今日获得 = 各账号"今天"的余额增量之和。用的是与账号行、积分条、热力图**完全同一套**
-  // 计算（U.bucketByDay，把余额变化归到观测到的那一天），所以这个数与鼠标悬停在某个
-  // 积分点/积分条上看到的那个 +积分 永远是同一口径，两者相加必然自洽。
+  // 今日获得 = 各账号"今天"的余额增量之和。算法在 U.sumTodayGained（util.js），与账号行、
+  // 积分条、热力图**完全同一套**（bucketByDay，把余额变化归到观测到的那一天），所以卡片
+  // 与悬停气泡永远同口径。与它替换掉的"上次运行获得积分"的区别：那个数只统计一次运行覆盖
+  // 到的账号，10 个号里有 1 个出错、下次只补跑那 1 个，合计就会从"10 个号"塌成"1 个号"而
+  // 忽大忽小；这个数只跟账号今天的余额涨了多少有关，跑几次、哪个号中途出错都不影响。
   //
-  // 与它替换掉的"上次运行获得积分"的区别：那个数只统计一次运行覆盖到的账号，10 个号里
-  // 有 1 个出错、下次只补跑那 1 个，合计就会从"10 个号"塌成"1 个号"而忽大忽小。
-  // 这个数只跟账号今天的余额涨了多少有关：跑几次、哪个号中途出错、错过多少轮，都不影响。
-  //
-  // 今天还没有任何账号被观测到 -> 显示 –（不知道），而不是 0。
-  const todayKey = U.tzDayKey(new Date());
-  const histories = accountsPayload?.histories || {};
-  // 账号列表必须取自 accountsPayload，**不能**取上面那个 data.accounts：
-  // 摘要接口（/api/summary）的账号对象里没有 key 字段（只有 email/userName/…），
-  // 拿它的 key 去查 histories 会 10 个账号全部落空，卡片就显示成 –（实测命中 0/10）。
-  // 历史与账号同源同键，是这里唯一安全的取法（下面的账号行用的是同一对）。
-  const historyAccounts = accountsPayload?.accounts || [];
-  let todayGained = 0;
-  let todayObserved = 0;
-  for (const a of historyAccounts) {
-    const bucket = U.bucketByDay(histories[a.key] || []).find((d) => d.dayKey === todayKey);
-    if (!bucket) continue;
-    todayGained += bucket.gained;
-    todayObserved += 1;
-  }
+  // 名单与历史必须同源（都取 accountsPayload）：摘要接口的账号对象没有 key 字段，混用会让
+  // 10 个账号全部落空、卡片显示成 –（实测命中 0/10，已由 tools/test-today-gained.mjs 固定）。
+  // 今天没有任何账号被观测到 -> observed=0 -> 显示 –（不知道），而不是 0。
+  const today = U.sumTodayGained(accountsPayload?.accounts, accountsPayload?.histories);
 
   U.$("#statGrid", root).innerHTML = [
     statCard("statAccounts", U.fmtNumber(accounts.length), "profiles", "Accounts tracked", "", "users"),
     statCard("statCombined", U.fmtNumber(combined), "points", "Combined balance", "", "bars"),
     statCard(
       "statTodayGained",
-      todayObserved ? U.fmtSigned(todayGained) : "\u2013",
+      today.observed ? U.fmtSigned(today.gained) : "\u2013",
       "points",
       "Points earned today",
       "",
