@@ -421,7 +421,8 @@ cached("accounts", ctx.api.accounts, 5000),   // → /api/accounts
 3. **`activity` 表的裁剪阈值数值** —— 知道有 `MAX_ACTIVITY_ROWS` / `MAX_GENERIC_ROWS`
    两个上限和对应的 `prune*` 语句，但没读这两个常量的具体数字。
 4. **`/api/summary` 的 `accounts` / `runs` / `activity` 三个字段前端是否都在用** ——
-   `overview.js:624-627` 同时取了 `summary` 和 `accounts` 两个接口，值得确认有没有重复取数。
+   `overview.js` 的 `refresh()` 里那次 `Promise.all`（同时取 `summary` 和 `accounts`
+   两个接口，L626-629）值得确认有没有重复取数。
    **已查实一件事（2026-10-14）**：`/api/summary` 的 `accounts[]` **没有 `key` 字段**
    （只有 `email` / `userName` / …），而 `/api/accounts` 的 `histories` 是以 email 为键的。
    拿 summary 的账号去查 histories **不报错**，只是全部落空 —— 「今日获得积分」卡片曾因此

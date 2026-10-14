@@ -336,7 +336,9 @@ function renderAccountRows(root) {
 
       // 这一行左侧原本只放一个小条形图，占着 1fr 的全宽却大片留白。
       // 把四个数字放进同一个格子：总积分 / 今日获得 / 总任务 / 已完成。
-      // 四个数现在都有真实来源：shownPoints 见 L293，todayGained 见 L258；
+      // 四个数现在都有真实来源：shownPoints（本函数里 `isRunning ? liveBalance : lastPoints`
+      // 那句，L324）、todayGained（本函数里 `U.bucketByDay` 那句，L277）——
+      // 行号会随改动漂，所以锚点写"哪一句"，行号只是顺手的提示。
       // 后两个是 a.totalTasks / a.completedTasks —— 来自 /api/accounts 的 accounts[]，
       // 由 lib/accounts.js 的 buildRow() 从 store 的 accounts 表带出来（它是个白名单，
       // 新增列必须在 buildRow 里显式写出，否则前端拿到的是 undefined，格子显示 "–"）。
