@@ -139,9 +139,14 @@ function renderStats(root, status) {
   // 今天还没有任何账号被观测到 -> 显示 –（不知道），而不是 0。
   const todayKey = U.tzDayKey(new Date());
   const histories = accountsPayload?.histories || {};
+  // 账号列表必须取自 accountsPayload，**不能**取上面那个 data.accounts：
+  // 摘要接口（/api/summary）的账号对象里没有 key 字段（只有 email/userName/…），
+  // 拿它的 key 去查 histories 会 10 个账号全部落空，卡片就显示成 –（实测命中 0/10）。
+  // 历史与账号同源同键，是这里唯一安全的取法（下面的账号行用的是同一对）。
+  const historyAccounts = accountsPayload?.accounts || [];
   let todayGained = 0;
   let todayObserved = 0;
-  for (const a of accounts) {
+  for (const a of historyAccounts) {
     const bucket = U.bucketByDay(histories[a.key] || []).find((d) => d.dayKey === todayKey);
     if (!bucket) continue;
     todayGained += bucket.gained;
