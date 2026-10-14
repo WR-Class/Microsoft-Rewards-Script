@@ -142,9 +142,11 @@ function renderStats(root, status) {
   U.$("#statGrid", root).innerHTML = [
     statCard("statAccounts", U.fmtNumber(accounts.length), "profiles", "Accounts tracked", "", "users"),
     statCard("statCombined", U.fmtNumber(combined), "points", "Combined balance", "", "bars"),
+    // 只显示分数，不带 + 号（2026-10-14 指定）：这个数一眼要读的是"今天拿了多少"，
+    // 正负号没有信息量。用 fmtNumber（与"合计余额"同一套千分位写法），不是 fmtSigned。
     statCard(
       "statTodayGained",
-      today.observed ? U.fmtSigned(today.gained) : "\u2013",
+      today.observed ? U.fmtNumber(today.gained) : "\u2013",
       "points",
       "Points earned today",
       "",
