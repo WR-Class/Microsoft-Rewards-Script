@@ -33,6 +33,8 @@ const REWARDS_LOGIN_URL = 'https://rewards.bing.com/auth/login'
 const REWARDS_HOST = 'rewards.bing.com'
 const STABLE_REWARDS_MS = 5000
 const POLL_INTERVAL_MS = 250
+const IDENTITY_POLL_MS = 1000
+const IDENTITY_TIMEOUT_MS = 25000
 
 const MANUAL_CONFIG_ENV_OVERRIDES = [
     { env: 'CONFIG_GLOBAL_TIMEOUT', path: ['globalTimeout'], type: 'string' },
@@ -82,6 +84,12 @@ Examples:
 The browser stays open while you sign in manually. Once it remains on a
 Microsoft Rewards page for five continuous seconds, the session is saved and
 the browser closes automatically.
+
+Before saving, the script reads which account the page says you are signed in
+as. If that is not the account you asked for, it refuses to save, so a session
+belonging to one account can never overwrite another account's session. Sign in
+with the requested account, or run the command again with the account you
+actually signed in as.
 `)
 }
 
@@ -219,6 +227,32 @@ function loadStoredSession(dbPath, email, platform, fresh) {
     } finally {
         closeSessionDb(db)
     }
+}
+
+// 读「页面自己声明的登录邮箱」。奖励页把它渲染在带 pii truncate 的节点里。
+// 之所以要读这个：弹窗的凭据是人输入的，所以"这份存档属于哪个账号"在保存那一刻
+// 只是一个说法，不是事实。2026-10-15 就发生过为 A 打开的弹窗里登进了 B，
+// 存档被写到 A 名下，机器人随后会拿 A 的名字用 B 的身份干活。
+export function signedInEmailFrom(html) {
+    const marked = [
+        ...html.matchAll(/className\\?":\\?"pii truncate\\?[^}]*?children\\?":\\?"([\w.+-]+@[\w-]+\.[\w.-]+)/g)
+    ]
+    if (marked.length) return marked[0][1]
+    const all = [...new Set(html.match(/[\w.+-]+@[\w-]+\.[\w.-]+/g) ?? [])].filter(
+        m => !/bing\.com|microsoft\.com|msn\.com|w3\.org|schema\.org|example\.com/i.test(m)
+    )
+    return all.length ? all[0] : null
+}
+
+async function readSignedInEmail(page) {
+    const deadline = Date.now() + IDENTITY_TIMEOUT_MS
+    while (Date.now() < deadline) {
+        const html = await page.content().catch(() => '')
+        const email = signedInEmailFrom(html)
+        if (email) return email
+        await new Promise(resolve => setTimeout(resolve, IDENTITY_POLL_MS))
+    }
+    return null
 }
 
 async function waitForStableRewardsPage(page, browser) {
@@ -393,6 +427,29 @@ async function runPlatform({ account, config, dbPath, platform, fresh }) {
         const storageState = await context.storageState()
         if (!storageState.cookies.length) {
             throw new Error('Rewards page was detected, but the browser had no cookies to save')
+        }
+
+        // 存之前先问页面：登录的到底是谁。凭据是人输入的，所以这一步不能省——
+        // 登成别的账号时把它存下去，等于把一个账号的会话写到另一个账号名下，
+        // 之后机器人会拿错名字用这个身份干活。
+        const signedInEmail = await readSignedInEmail(page)
+        if (!signedInEmail) {
+            log(
+                'WARN',
+                '页面没有显示登录的是哪个账号，无法核对身份。存档将照常保存，但请在运行前用 ' +
+                    'node tools/check-session-identity.mjs 确认它属于 ' +
+                    account.email
+            )
+        } else if (signedInEmail.toLowerCase() !== account.email.toLowerCase()) {
+            log('ERROR', `登进去的是 ${signedInEmail}，不是本次要求的 ${account.email}`)
+            log(
+                'ERROR',
+                '为了不让一份别的账号的会话覆盖 ' +
+                    `${account.email} 的存档，本次不保存。请重新运行弹窗，并在登录页选择/输入 ${account.email}。`
+            )
+            throw new Error(`Manual login signed in as ${signedInEmail}, expected ${account.email}`)
+        } else {
+            log('INFO', `身份已核对：页面显示登录的是 ${signedInEmail}，与本次要求的账号一致`)
         }
 
         saveManualSession(dbPath, account.email, platform, storageState, fingerprint, savesFingerprint)
