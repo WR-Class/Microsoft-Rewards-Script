@@ -265,14 +265,21 @@ docker compose restart          # 重启（不重建）
 
 ### 静默启动与桌面快捷方式
 
-`node server.js` 是前台进程，关掉终端面板就没了。Windows 上推荐用 `%LOCALAPPDATA%\RewardsPanel\start-all.ps1` 一次拉起两个进程（控制 API `:3010` + 面板 `:8890`），都用 `Start-Process -WindowStyle Hidden` 隐藏窗口：
+`node server.js` 是前台进程，关掉终端面板就没了。Windows 上的启动脚本放在**仓库里**（`scripts/win/`），与代码一起版本管理：
 
-- 日志：`%LOCALAPPDATA%\RewardsPanel\` 下的 `panel.log`、`panel.log.err`、`api.log`、`api.log.err`
-- 桌面快捷方式 `奖励面板.lnk` 指向：
-  `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%LOCALAPPDATA%\RewardsPanel\start-all.ps1"`
+- `scripts/win/start-services.vbs` —— 静默入口，由 `wscript.exe` 运行（**完全不分配控制台**）
+- `scripts/win/start-services.ps1` —— 真正的启动逻辑，一次拉起控制 API `:3010` 与面板 `:8890`，两者都用 `Start-Process -WindowStyle Hidden`
 - 脚本是幂等的：端口已在监听就跳过，不会起第二份
-- 单独重启面板：结束 `node server.js` 进程后重新执行一次 `start-all.ps1`
-- ⚠️ `start-all.ps1` 从**非交互 shell** 里用 `& powershell -File` 直接调用会阻塞（实测：命令挂住，强行结束该进程时会把控制 API 一起带走）。脚本里要拉起服务请直接用 `Start-Process`，不要包一层
+- 日志：`%LOCALAPPDATA%\RewardsPanel\` 下的 `panel.log`、`panel.log.err`、`api.log`、`api.log.err`
+- 单独重启面板：结束 `node server.js` 进程，停掉 `RewardsPanel` 计划任务实例，再启动一次该任务（或直接双击桌面快捷方式）
+
+**不要写成让计划任务直接调用 `node.exe`。** 计划任务的动作会分配一个控制台窗口，于是屏幕上常驻一个黑窗口；那个窗口一旦被关掉，`node` 就收到"控制台关闭"事件被杀，任务结果是 `3221225786`（即 `0xC000013A`，`STATUS_CONTROL_C_EXIT`）—— 面板就是这样消失的。`wscript.exe` 根本不分配控制台，没有窗口可关。
+
+- 开机自启：计划任务 `RewardsPanel`，登录时触发，动作为
+  `wscript.exe //B //Nologo "<仓库>\scripts\win\start-services.vbs"`
+  已设为单实例、不限时
+- 桌面快捷方式 `奖励面板.lnk` 指向同一个 `.vbs`，用于手动拉起
+- ⚠️ 从**非交互 shell** 里用 `& powershell -File` 直接调用启动脚本会阻塞（实测：命令挂住，强行结束该进程时会把它拉起的服务一起带走）。要拉起服务请走 `.vbs`，或在脚本里直接用 `Start-Process`，不要包一层
 
 ### 面板是只读观察者
 
