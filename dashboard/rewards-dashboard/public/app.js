@@ -50,6 +50,7 @@ const els = {
   btnStart: U.$("#btnStart"),
   btnStop: U.$("#btnStop"),
   btnRestart: U.$("#btnRestart"),
+  btnApiStart: U.$("#btnApiStart"),
   btnMore: U.$("#btnMore"),
   ctlMenu: U.$("#ctlMenu"),
   btnForceStop: U.$("#btnForceStop"),
@@ -357,6 +358,9 @@ function renderControlStrip() {
   els.btnRestart.disabled = !usable;
   els.btnForceStop.disabled = !usable || !running;
   els.btnShutdown.disabled = !usable;
+  // 反过来：API 在线时这个按钮没有意义，而且重启一个健康的 API 只会丢掉它内存里的
+  // 运行统计（实测 totals 会变 null）。所以它只在 API 不可达时才可用。
+  els.btnApiStart.disabled = Boolean(s?.reachable);
 }
 
 async function control(action, body, { confirm: confirmMsg, success } = {}) {
@@ -383,6 +387,16 @@ function initControls() {
       {
         confirm: "Restart the bot? A run in progress will be stopped first.",
         success: "Restarting\u2026",
+      },
+    ),
+  );
+  els.btnApiStart.addEventListener("click", () =>
+    control(
+      "api-start",
+      {},
+      {
+        confirm: "Start the control API? The dashboard reconnects on its own.",
+        success: "Start requested.",
       },
     ),
   );

@@ -18,7 +18,8 @@ const { PendingLoginCodes } = require("./lib/pendingLoginCodes");
 const { mergeAccounts } = require("./lib/accounts");
 const { summarize: summarizeFailures } = require("./lib/failureReasons");
 const { listAccounts, upsertAccount, removeAccount } = require("./lib/accountEnv");
-const { credentialWriteAllowed } = require("./lib/netAccess");
+const { credentialWriteAllowed, isLoopbackAddress } = require("./lib/netAccess");
+const { createApiSupervisor } = require("./lib/apiSupervisor");
 
 // confg
 const PORT = Number(process.env.PORT || 8890);
@@ -56,6 +57,37 @@ const log = (level, msg) => {
   else if (level === "warn") console.warn(line);
   else console.log(line);
 };
+
+// 控制 API 的启动器（lib/apiSupervisor.js）。它要的每一样都已经在配置里：仓库根由
+// BOT_ENV_PATH 推出，解释器就用面板自己的 node，端口取面板正在连的那个地址 —— 不新增
+// 任何配置键。日志目录与主机上的 scripts/win/start-services.ps1 一致，这样"是谁起的"
+// 不会改变日志落在哪。
+const API_TARGET = (() => {
+  try {
+    const u = new URL(CONTROL_API_URL);
+    return {
+      host: u.hostname,
+      port: Number(u.port || (u.protocol === "https:" ? 443 : 80)),
+    };
+  } catch {
+    return { host: "", port: 0 };
+  }
+})();
+// 只有 API 就在本机，面板才可能把它拉起来。容器部署里 CONTROL_API_URL 指向另一个
+// 容器，这条路必须自己让开，而不是留一个按了没反应的按钮。
+const API_IS_LOCAL =
+  API_TARGET.host === "localhost" || isLoopbackAddress(API_TARGET.host);
+const API_LOG_DIR =
+  process.env.API_LOG_DIR ||
+  path.join(process.env.LOCALAPPDATA || __dirname, "RewardsPanel");
+const apiSupervisor = createApiSupervisor({
+  execPath: process.execPath,
+  repoRoot: BOT_ENV_PATH ? path.dirname(BOT_ENV_PATH) : "",
+  host: API_TARGET.host,
+  port: API_TARGET.port,
+  logDir: API_LOG_DIR,
+  log,
+});
 
 // 补录日志文件里 store 还不知道的账号终态。位置很关键：必须在 EventHub 建立
 // 连接之前跑完，否则实时事件先到，补录进来的历史事件会被时间戳守卫挡住。
@@ -850,6 +882,26 @@ async function handleApi(req, res, url) {
   // control
   if (pathname.startsWith("/api/control/") && method === "POST") {
     const action = pathname.slice("/api/control/".length);
+
+    // 这个动作在面板**自己的进程里**处理，绝不转发：它要修的就是转发通道本身
+    // （API 一死就没有接收方，app.js 里那个"重启"正是因此失效）。它比其他动作重
+    // 一档 —— 它在执行进程 —— 所以闸门也自己上，判据与账号写入完全一致。
+    if (action === "api-start") {
+      if (!DASHBOARD_AUTH_ENABLED && !isLoopbackAddress(req.socket.remoteAddress)) {
+        return sendJson(res, 403, {
+          error: "为安全起见，只有本机请求可以启动控制 API。",
+          hint: "设置 DASHBOARD_USERNAME / DASHBOARD_PASSWORD 开启面板登录后，才允许其他机器操作。",
+        });
+      }
+      if (!API_IS_LOCAL) {
+        return sendJson(res, 409, {
+          error: "控制 API 不在本机，面板起不了它。",
+          hint: `CONTROL_API_URL 指向 ${API_TARGET.host}（容器部署就是这样），请在那边启动。`,
+        });
+      }
+      return sendJson(res, 200, await apiSupervisor.start());
+    }
+
     if (!["start", "stop", "restart", "shutdown"].includes(action)) {
       return sendJson(res, 404, { error: "Unknown control action" });
     }

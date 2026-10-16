@@ -33,6 +33,10 @@ const EXACT = {
   "More actions": "更多操作",
   "Force stop (SIGKILL)": "强制终止（SIGKILL）",
   "Shut down control API": "关闭控制 API",
+  "Start control API": "启动控制 API",
+  "Start the control API? The dashboard reconnects on its own.":
+    "启动控制 API？面板会自己重新连上，不用刷新页面。",
+  "Start requested.": "已请求启动。",
   "🔑 Login approval needed": "🔑 需要批准登录",
   "Login approval needed": "需要批准登录",
   Development: "开发版",
