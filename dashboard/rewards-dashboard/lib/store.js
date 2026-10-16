@@ -291,7 +291,10 @@ class Store {
                     user_name = excluded.user_name,
                     geo_locale = excluded.geo_locale,
                     status = 'running',
-                    last_start_at = excluded.last_start_at
+                    last_start_at = excluded.last_start_at,
+                    -- 新一轮尝试一开始，上一轮的判决就不再代表这个账号的现状：留着它，
+                    -- 卡片会在"进行中"的同时挂着上一次的报错。
+                    last_error = NULL
             `),
       upsertAccountEnd: this.db.prepare(`
                 INSERT INTO accounts (email, user_name, status, last_end_at, last_gained, last_points, last_duration_sec, last_error)

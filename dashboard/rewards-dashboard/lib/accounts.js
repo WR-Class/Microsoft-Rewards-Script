@@ -45,6 +45,24 @@ function mergeAccounts(apiAccounts, observed, histories, liveAccounts) {
   return merged;
 }
 
+// API 的账号历史整轮结束才写入，所以它会滞后于面板自己观测到的那一轮。谁的时间更新，
+// 谁单独说了算 —— 包括"没有错误"：只按空值回退（`a || b`）会在新鲜的那边合法为空时漏出陈旧那条。
+function observedAtMs(row) {
+  if (!row) return null;
+  const raw = row.lastEndAt || row.lastStartAt || null;
+  const ms = raw ? Date.parse(raw) : NaN;
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function pickLastError(local, config) {
+  const localMs = observedAtMs(local);
+  const apiMs = config && config.lastRunAt ? Date.parse(config.lastRunAt) : NaN;
+  if (localMs != null && (!Number.isFinite(apiMs) || localMs >= apiMs)) {
+    return local.lastError || null;
+  }
+  return (local && local.lastError) || (config && config.lastError) || null;
+}
+
 function buildRow({ config, local, histories, live = null }) {
   const email = (local && local.email) || (config && config.email) || "unknown";
   const history = (local && histories && histories[local.email]) || [];
@@ -85,8 +103,7 @@ function buildRow({ config, local, histories, live = null }) {
     lastGained: local ? local.lastGained : null,
     lastPoints: local ? local.lastPoints : null,
     lastDurationSec: local ? local.lastDurationSec : null,
-    lastError:
-      (local && local.lastError) || (config && config.lastError) || null,
+    lastError: pickLastError(local, config),
     streakProtectionEnabled:
       local && local.streakProtectionEnabled != null
         ? Boolean(local.streakProtectionEnabled)
