@@ -128,11 +128,12 @@
 |---|---|
 | `apiClient.js` | 控制 API 的 HTTP 客户端。面板 server 里所有 `client.get("/status")` 都走它。**还导出 `entryToDockerLine(entry)`** —— 实时链路的必需一环（见第 0 节要点 4） |
 | `parser.js` | **日志行解析**（把一行日志变成结构化字段；`REACT-PARSE`、`PUNCHCARD` 等 case 在这）。**数字字段一律同时接受 `null`**：上游在"基线未知"时会写 `null` 而不是数字，按 `\d+` 抓会整行匹配失败。<br>与本面板直接有关的两条规则：`已解析任务子项 \| 总数=N \| 可上报=M` → `task-progress`（**`可上报` = 未完成**，所以已完成 = 总数 − 可上报）；`任务列表 \| 父任务=N \| 未完成=M` **不要用** —— 它的 `complete` 依赖抓取片段里出现 `N / M tasks` 进度文本，实测 4 天 135 行一次都没匹配到，`未完成` 恒等于 `父任务`、完成数恒为 0<br>**RUN-END 的部分和**：行里带「（另有 N 个账号基线未知，未计入）」（挂 `原余额`）或「（另有 N 个账号余额未知，未计入）」（挂 `现余额`）时，**对应字段解析成 `null` 而不是那个数**。括注必须是非捕获的（否则 `am[3]/am[4]/am[5]` 会整体平移），正因为它非捕获，注解要用 `PARTIAL_BASELINE_RE` / `PARTIAL_BALANCE_RE` 单独再取一次；`获得积分` 没有自己的注解，任一注解出现即 `null`。不这样做，运行记录页会把 9/10 账号未知的部分和当成"现余额 0"显示。**回归测试：`node tools/test-parser-runend.mjs`**，加 `--logs` 会把 `logs/*.log` 里全部 RUN-END 行重解析一遍核对不变量 |
-| `store.js` | `Store` 类，SQLite 读写与聚合（账号 / 运行 / 历史 / 事件）。面板的数据面。`apply(event, { backfill })`：补录允许比水位旧，但水位只升不降。<br>**账号关联键看字段**：`account-end` 等行按 `email`；`task-progress` 那行的账号段是**用户名**，所以 `setAccountTasks` 按 `user_name` 关联（实测 10 个账号按 email 命中 0 行、按 user_name 命中 1 行；写错会一行都更新不到，**且不报错**）。对外字段经 `snapshotAccounts()` / `allAccounts` 暴露成 camelCase |
+| `store.js` | `Store` 类，SQLite 读写与聚合（账号 / 运行 / 历史 / 事件）。面板的数据面。`apply(event, { backfill })`：补录允许比水位旧，但水位只升不降。<br>**账号关联键看字段**：`account-end` 等行按 `email`；`task-progress` 那行的账号段是**用户名**，所以 `setAccountTasks` 按 `user_name` 关联（实测 10 个账号按 email 命中 0 行、按 user_name 命中 1 行；写错会一行都更新不到，**且不报错**）。对外字段经 `snapshotAccounts()` / `allAccounts` 暴露成 camelCase。<br>**账号一进入新一轮，上一轮的判决就作废**：`upsertAccountStart` 同时把 `last_error` 置 NULL（只清这一列，不动其它），否则卡片会在"进行中"的同时挂着上一次的报错。**回归测试：`node tools/test-accounts-freshness.mjs`** |
 | `logFileReplay.js` | **启动时从 `logs/*.log` 按账号对账补录**（`resolveLogDir` / `replayLogFiles`）。**必须在 `EventHub` 连接之前跑完**，否则补录会被时间戳守卫挡住 |
 | `eventHub.js` | SSE 扇出：把新事件推给所有打开的浏览器。注意它的 `replay` 选项**只发给浏览器，不回写 SQLite** |
 | `scheduler.js` / `cron.js` | 调度与定时 |
-| `accounts.js` / `accountEnv.js` | 面板保存的账号 ↔ `.env` 变量的映射 |
+| `accounts.js` | `/api/accounts` 的行拼装：`mergeAccounts()`（控制 API 的账号清单 + 面板自己观测的行，按 email 合并）与 `buildRow()`（**字段白名单**，见第 5 节）。<br>**`lastError` 是唯一按"新鲜度"取、而不是按"有没有值"取的字段**：控制 API 的账号历史**整轮结束才写入**（`scripts/api/processManager.js` 的 `_finalize`），必然比面板自身观测滞后一轮；`pickLastError()` 比较两边的时间戳，谁新谁单独作数 —— **包括"没有错误"**。按 `a \|\| b` 的空值回退，会在"今天成功、API 还停在上一轮"时报出昨天的错（实测 2026-10-16：某账号当天 +110 分，卡片仍挂着前一天的 `EMAIL_VERIFICATION_INPUT`）。**回归测试：`node tools/test-accounts-freshness.mjs`** |
+| `accountEnv.js` | 面板保存的账号 ↔ `.env` 变量的映射 |
 | `failureReasons.js` | 把 `last_error` 归成失败原因 |
 | `themeLoader.js` | 主题加载 |
 | `pendingLoginCodes.js` | 待输入的登录验证码 |
@@ -294,20 +295,20 @@ cached("accounts", ctx.api.accounts, 5000),   // → /api/accounts
 
 **① `store` 的几张表由谁写满 —— 只有一个入口函数、两个调用方。**
 
-所有写库都汇到 `store.apply(event, { backfill })`（`lib/store.js:629`），调用方只有两个：
+所有写库都汇到 `store.apply(event, { backfill })`（`lib/store.js:671`），调用方只有两个：
 `server.js:210`（实时：`EventHub → entryToDockerLine → parseLine → store.apply`）和
 `lib/logFileReplay.js`（启动补录，带 `backfill: true`）。
 
 | 表 | 谁写 | 关键语句 |
 |---|---|---|
-| `accounts` | 账号生命周期事件 | `upsertAccountStart` / `upsertAccountEnd` / `upsertAccountError` / `upsertStreakProtection` / `setAccountTasks` / `markAccountInterrupted` / `markAccountCompletedWithoutResult` |
-| `account_history` | **只有两个事件**：`account-end`（`store.js:668`）和 `account-balance-read`（`store.js:978`） | `insertHistory`（`INSERT OR IGNORE`，靠秒级唯一索引去重，重放不会重复） |
+| `accounts` | 账号生命周期事件 | `upsertAccountStart` / `upsertAccountEnd` / `upsertAccountError` / `upsertStreakProtection` / `setAccountTasks` / `markAccountInterrupted` / `markAccountCompletedWithoutResult`。**`upsertAccountStart` 除了置 `status='running'`，还清 `last_error`** —— 新一轮尝试一开始，上一轮的错误就不再代表这个账号的现状。回归测试：`node tools/test-accounts-freshness.mjs` |
+| `account_history` | **只有两个事件**：`account-end`（`store.js:708`）和 `account-balance-read`（`store.js:1056`） | `insertHistory`（`INSERT OR IGNORE`，靠秒级唯一索引去重，重放不会重复） |
 | `activity` | **只有少数事件写活动**：账号边界（`account-start` / `account-end` / `account-error` / `account-delay`）、运行起止、登录提示、`cluster-worker-exit` 才经 `_pushActivity` → `insertActivity`。**不是每个事件都写** —— 实测一次 410 分钟的运行只落了 9 条（`account-start`×3、`account-end`×2、`account-delay`×2、`account-error`×1、`run-end`×1）。所以**不能拿 activity 判断"运行还活着"**：单账号耗时 113~156 分钟是常态，90 分钟没有活动行是正常的。看门狗的判据是 `apply()` 里记的 `_lastEventTs`（每行日志都过手），见 `_tryCloseStaleNoActivityRun` | 裁剪走 `countActivity` / `pruneActivity` / `pruneGenericActivity` |
 | `runs` | 运行级事件 | `insertRunStart` / `closeRunFull` / `insertOrphanRunEnd`。**`status='stalled'` 的含义是"没有任何证据就放弃"**（看门狗/自动闭合抢先把还在跑的运行关掉），不是崩溃；`interrupted` / `stopped` / `crashed` 都有进程退出这类真实证据。RUN-END 到达而 `findRunningRun` 为空时，会先回头复用 6 小时内被关掉的 `stalled` 行（`RUN_END_REUSE_WINDOW_MS`），真没有才插 `start_ts` 为 NULL 的孤儿 —— 不这样做，同一次运行会出现两行（实测 2026-10-10）。回归测试：`node tools/test-store-watchdog.mjs` |
 | `meta` | 杂项键值 | `_writeMeta` |
 
 注意 `account-balance-read` 只写一条余额快照（`points=N`、`gained=null`），
-**不碰 status、也不触发收尾** —— 读一条余额不等于跑完一次（`store.js:972-985`）。
+**不碰 status、也不触发收尾** —— 读一条余额不等于跑完一次（`store.js:1056-1071`）。
 所以 `account_history` 里 `gained` 为 NULL 的行是余额快照，不是一次完成。
 
 **② `/api/summary` 的字段形状**（`server.js:522`）
@@ -327,7 +328,7 @@ cached("accounts", ctx.api.accounts, 5000),   // → /api/accounts
 - `status`（`currentState()`）：`reachable, authRequired, authOk, lastError, checkedAt, displayName,
   timezone, controlApiUrl, name, version, uptimeSec, bot, botState, botRunning, schedule,
   remoteSchedule, remoteScheduleSupported, stream, lastEventAt, pendingDelay, codes`
-- **`accounts` 是 store 原始行**（`allAccounts` 的 SELECT 别名，`store.js:336`）：
+- **`accounts` 是 store 原始行**（`allAccounts` 的 SELECT 别名，`store.js:351`）：
   `email, userName, geoLocale, status, lastStartAt, lastEndAt, lastGained, lastPoints,
   lastDurationSec, lastError, streakProtection*, totalTasks, completedTasks`
   —— **不含**控制 API 的配置字段（`index/langCode/hasTotp/proxy/...`）。
@@ -352,6 +353,7 @@ cached("accounts", ctx.api.accounts, 5000),   // → /api/accounts
   completedTasks`），外加运行中的实时值（`liveGained/liveBalance/liveBySource/earnable/
   lastActivityAt`）和 `historyCount`。
   **API 那三个数是 null 不是 0** —— 拿不到就是"不知道"，前端三处消费方都加了 null 守卫。
+  - **这一组里只有 `lastError` 按"新鲜度"取，其余按"有没有值"取**：`pickLastError()` 拿 `local.lastEndAt/lastStartAt` 与控制 API 那轮的 `lastRunAt` 比时间，面板观测到的那一轮不早于 API 记录的那一轮时，就由面板单独作数（**包括"没有错误"**）；面板从没观测过这个账号时，仍按原样回退到 API。为什么不能简单地 `local.lastError \|\| config.lastError`：控制 API 的账号历史整轮结束才写入，会滞后一轮，而成功时本地合法地变空，正好漏到陈旧那条。回归测试：`node tools/test-accounts-freshness.mjs`（含"API 才是新的一轮时用 API"一条，防止无条件偏向本地）。
 - **`buildRow()` 是白名单**：store 里新增的列**不会**自动出现在 `/api/accounts` 里，
   必须在这个函数里显式写一行。同一个字段在 ② 和 ③ 里的可见性**可能不同** ——
   例如 `totalTasks`/`completedTasks` 在 ② 里有、在 ③ 里曾经没有（见 41cf1db）。
