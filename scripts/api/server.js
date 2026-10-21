@@ -644,10 +644,15 @@ const requestHandler = async (req, res) => {
                     const selection = buildSingleAccountEnv(body.accountIndex, accountsEnv())
                     overrides.env = { ...(overrides.env || {}), ...selection.env }
                     selectedAccount = selection.account
+                    overrides.selection = { includedAccounts: [selection.account], excludedAccounts: [] }
                 } else if (body.excludedAccountIndexes != null) {
                     const selection = buildExcludedAccountsEnv(body.excludedAccountIndexes, accountsEnv())
                     overrides.env = { ...(overrides.env || {}), ...selection.env }
                     excludedAccounts = selection.excludedAccounts
+                    overrides.selection = {
+                        includedAccounts: selection.includedAccounts,
+                        excludedAccounts: selection.excludedAccounts
+                    }
                 }
                 const info = pm.start(overrides)
                 return sendJson(res, 202, { started: true, selectedAccount, excludedAccounts, ...info })
@@ -698,10 +703,15 @@ const requestHandler = async (req, res) => {
                     const selection = buildSingleAccountEnv(body.accountIndex, accountsEnv())
                     overrides.env = { ...(overrides.env || {}), ...selection.env }
                     selectedAccount = selection.account
+                    overrides.selection = { includedAccounts: [selection.account], excludedAccounts: [] }
                 } else if (body.excludedAccountIndexes != null) {
                     const selection = buildExcludedAccountsEnv(body.excludedAccountIndexes, accountsEnv())
                     overrides.env = { ...(overrides.env || {}), ...selection.env }
                     excludedAccounts = selection.excludedAccounts
+                    overrides.selection = {
+                        includedAccounts: selection.includedAccounts,
+                        excludedAccounts: selection.excludedAccounts
+                    }
                 }
                 const info = await pm.restart(overrides)
                 return sendJson(res, 202, { restarted: true, selectedAccount, excludedAccounts, ...info })

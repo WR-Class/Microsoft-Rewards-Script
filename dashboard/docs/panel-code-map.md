@@ -95,6 +95,12 @@
 | GET | `/events` | **SSE 实时流** |
 | POST | `/start` `/stop` `/restart` `/shutdown` | 进程控制 |
 
+`/start` 与 `/restart` 都收 `accountIndex`（只跑这一个）或 `excludedAccountIndexes`（跑其余），两者**互斥**（同时给 → 400）。`/restart` 是"停完再起"：`pm.restart` 会等旧进程真的退出（带 SIGKILL 兜底）才 spawn 新的，然后把新一批的信息直接返回，所以调用方不需要自己轮询状态，也不会撞上 `ALREADY_RUNNING`。
+
+**没有"停某一个账号"。** `/stop` 只认 `force`，作用对象是整个进程；机器人是顺序跑的一次性进程，API 也没有"中途让机器人跳过某个账号"的通道。面板里那个 **「停此续跑」** 因此是组合出来的：`/restart` + `excludedAccountIndexes` = 排除掉"这一批已经碰过的"和"你点名的这一个"，剩下的接着跑完。
+
+`/status` 的 `run.selection` = **这一批启动时收到的选择**（`{includedAccounts, excludedAccounts}`，没走账号筛选时为 `null`）。面板算排除集合必须用它：只看 `run.accounts`（已经碰过谁）会把"启动时就被排除掉的账号"重新放回来 —— 一批用排除法启动的任务，第二次续跑就会把原来排除的账号全部跑一遍。
+
 ---
 
 ## 2. 面板服务（:8890）端点表
@@ -153,7 +159,7 @@
 | `api.js` | `api`（端点对象）、`cached(key, fetcher, ttlMs)`（缓存层）、`invalidate(key)` |
 | `util.js` | 工具（`escapeHtml`、`tzDayKey` 等）+ **按天分桶与"今日获得"的计算**：`bucketByDay`（把余额差归到观测到的那天）、`sumTodayGained`（把各账号今天那一格加起来 —— 总览页卡片上那个数就是它）。回归测试：`node tools/test-today-gained.mjs` |
 | `charts.js` | 图表构建器：`lineChart`、`barChart`、`buildHeatmapHtml`、**`buildAccumBarHtml`** |
-| `views/overview.js` | **总览页（含「账户总览」那一块）** |
+| `views/overview.js` | **总览页（含「账户总览」那一块）**。账号行有两个动作：`仅运行` = `start` + `accountIndex`，**任务进行中被禁用**（同一时间只允许一个运行，否则 409）；`停此续跑` = `restart` + `excludedAccountIndexes`，**只在任务进行中出现**，且只出现在"还没开始"和"正在跑"的账号行上（已经出结果的没有，没什么可停的）。两者共用 `accountsPayload.accounts` 的 `index`。 |
 | `views/runs.js` | 运行历史页 |
 | `views/accounts.js` | 账号页 |
 | `views/logs.js` | 日志页 |

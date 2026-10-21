@@ -17,6 +17,9 @@ const VIEW_STORAGE_KEY = "rewards_dashboard_view_mode";
 let viewMode = localStorage.getItem(VIEW_STORAGE_KEY) || "accum"; // Load stored view or default to 'accum'
 
 const launching = new Set();
+// 正在执行"停这一个、续跑其余"的账号索引。与 launching 分开:一次是起一个新进程,
+// 一次是换掉当前这一批,两者的按钮禁用条件不同。
+const continuing = new Set();
 
 const NUMERIC = /^[+\-\u2013]?[\d,.]*$/;
 
@@ -110,6 +113,76 @@ async function runAccount(account) {
     context.toast(error.message, error.status === 409 ? "warn" : "error");
   } finally {
     launching.delete(account.index);
+    renderAccountRows(rootEl);
+  }
+}
+
+// 「停这一个,继续其余」。
+//
+// 机器人是顺序跑的一次性进程,而 API 只能对整个进程发信号 —— 没有"中途让机器人跳过
+// 某个账号"的通道,所以单账号停止没法直接做。这里做等价的事:换掉当前这一批,把"已经
+// 开始过的"和"你点名的这个"排除掉,剩下的接着跑完。
+//
+// 走 /restart 而不是 stop + start:API 侧的 pm.restart 会等旧进程真的退出(带 SIGKILL
+// 兜底)再起新的,并把新运行的信息直接返回 —— 前端不用自己轮询状态,也不会撞上
+// ALREADY_RUNNING 的竞态。
+function continuePlan(account) {
+  const run = context?.status?.bot?.run || null;
+  const configured = (accountsPayload?.accounts || []).filter((a) =>
+    Number.isInteger(a.index),
+  );
+  const attempted = new Set((run?.accounts || []).map((a) => a.email));
+  attempted.add(account.email);
+
+  // 这一批原本要跑哪些。API 在 run.selection 上带出它启动时收到的选择 —— 只用
+  // run.accounts(已经碰过谁)会漏掉"启动时就被排除掉的账号",把它们重新放回来。
+  // 拿不到 selection(老 API)时按"全部账号"算,退化成"排除已碰过的 + 这一个"。
+  const included = Array.isArray(run?.selection?.includedAccounts)
+    ? new Set(run.selection.includedAccounts.map((a) => a.email))
+    : null;
+
+  const keep = configured.filter(
+    (a) => (!included || included.has(a.email)) && !attempted.has(a.email),
+  );
+  const keepEmails = new Set(keep.map((a) => a.email));
+  return {
+    excluded: configured.filter((a) => !keepEmails.has(a.email)).map((a) => a.index),
+    remaining: keep.length,
+  };
+}
+
+async function stopAndContinue(account) {
+  const plan = continuePlan(account);
+  if (!plan.remaining) {
+    context.toast(
+      "已经没有「还没跑」的账号了 —— 停掉这一个就等于结束整批,直接用「停止」就好。",
+      "warn",
+      7000,
+    );
+    return;
+  }
+  const yes = window.confirm(
+    `停止当前任务,跳过 ${account.email} 以及已经跑过的,\n继续把剩下的 ${plan.remaining} 个账号跑完?\n\n旧进程会先退出,当前跑到一半的那个账号进度作废。`,
+  );
+  if (!yes) return;
+
+  continuing.add(account.index);
+  renderAccountRows(rootEl);
+  try {
+    await context.api.control("restart", {
+      excludedAccountIndexes: plan.excluded,
+    });
+    context.toast(
+      `已跳过 ${account.email},接着跑剩下的 ${plan.remaining} 个。`,
+      "success",
+      6000,
+    );
+    context.invalidate();
+    await context.refresh();
+  } catch (error) {
+    context.toast(`续跑失败:${error.message}`, "error", 8000);
+  } finally {
+    continuing.delete(account.index);
     renderAccountRows(rootEl);
   }
 }
@@ -225,6 +298,12 @@ function renderAccountRows(root) {
   const accounts = accountsPayload?.accounts || [];
   const histories = accountsPayload?.histories || {};
   const { usable, running } = controlState();
+  // 这一批已经碰过的账号,以及此刻正在跑的那一个 —— 决定"停此续跑"出现在哪几行。
+  // 不拿 `success != null` 当"跑完了"的判据:失败过的账号它是 false,而刚起步的账号
+  // 可能还没被判定,口径不统一;直接认 live.currentAccount 更实在。
+  const botRun = context?.status?.bot?.run || null;
+  const attemptedEmails = new Set((botRun?.accounts || []).map((a) => a.email));
+  const liveEmail = botRun?.live?.currentAccount || null;
 
   const errEl = U.$("#ovwAccountsError", root);
   if (errEl) {
@@ -397,6 +476,10 @@ function renderAccountRows(root) {
                     <span class="hero-pts-unit">Days run</span>
                 </div>
                 <div class="hero-acc-actions">
+                    ${a.configured && Number.isInteger(a.index) && running && (!attemptedEmails.has(a.email) || a.email === liveEmail)
+                      ? `<button type="button" class="link-btn" data-continue-account="${a.index}" ${continuing.has(a.index) ? "disabled" : ""} title="Stop the run and skip ACCOUNT_${a.index}, then continue with the accounts that have not started yet">${continuing.has(a.index) ? "Working…" : "Stop & continue"}</button>`
+                      : ""
+                    }
                     ${a.configured && Number.isInteger(a.index)
                       ? `<button type="button" class="link-btn" data-run-account="${a.index}" ${!usable || running || launching.has(a.index) ? "disabled" : ""} title="Run only ACCOUNT_${a.index}">${launching.has(a.index) ? "Starting…" : "Run only"}</button>`
                       : ""
@@ -423,6 +506,14 @@ function renderAccountRows(root) {
       const index = Number(btn.dataset.runAccount);
       const account = accounts.find((a) => a.index === index);
       if (account) runAccount(account);
+    }),
+  );
+
+  container.querySelectorAll("button[data-continue-account]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const index = Number(btn.dataset.continueAccount);
+      const account = accounts.find((a) => a.index === index);
+      if (account) stopAndContinue(account);
     }),
   );
 

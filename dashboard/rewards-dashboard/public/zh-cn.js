@@ -125,6 +125,8 @@ const EXACT = {
   "Batch run": "批量运行",
   "Run selected": "运行所选",
   "Run only": "仅运行",
+  "Stop & continue": "停此续跑",
+  "Working…": "处理中…",
   "Run history": "运行历史",
   "Runs recorded by the API": "API 记录的运行",
   "Select all": "全选",

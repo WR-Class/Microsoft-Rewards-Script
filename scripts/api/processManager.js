@@ -71,6 +71,10 @@ export class ProcessManager extends EventEmitter {
         this.startedAt = new Date().toISOString()
         this.lastExit = null
         this.currentArgs = args
+        // 这一批实际跑的是哪些账号。面板的"停这一个、继续其余"必须照它算排除集合：
+        // 只看 runState.accounts(已经碰过谁)是不够的 —— 一批用 excludedAccountIndexes
+        // 启动的任务，那样算会把"启动时就被排除掉的账号"重新放回来。
+        this.selection = overrides.selection ?? null
         this._stdoutBuf = ''
         this._stderrBuf = ''
         this._finalized = false
@@ -174,7 +178,11 @@ export class ProcessManager extends EventEmitter {
             logCount: this.logBuffer.length,
             logBufferSize: this.logBufferSize,
             latestLogId: this.logSeq,
-            run: summarizeRunState(this.runState)
+            run: {
+                ...summarizeRunState(this.runState),
+                // 这一批实际要跑的账号（启动时收到的选择）。null = 没走账号筛选。
+                selection: this.state === 'idle' ? null : this.selection
+            }
         }
     }
 
