@@ -21,6 +21,10 @@
   --bad: #F87171; --badsoft: rgba(248, 113, 113, .13);
   --warn: #FBBF24; --warnsoft: rgba(251, 191, 36, .12);
   --vio: #A78BFA; --viosoft: rgba(167, 139, 250, .15);
+  /* "运行中"单独占一个槽位。这三处以前都直接吃 --acc，而浅色主题的 --acc 是橘红
+     （#C2410C），和错误红（--bad #DC2626）在小字号下几乎分不出来。现在是绿色；
+     要再调只改这一行，三处一起跟着变。 */
+  --run: var(--ok); --runsoft: var(--oksoft);
   --shadow: 0 12px 32px rgba(2, 8, 20, .45);
   --hi: inset 0 1px 0 rgba(210, 230, 255, .05);
   --dot: rgba(140, 180, 255, .06);
@@ -342,7 +346,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--acc); }
 .pill-success { background: var(--oksoft); color: var(--ok); }
 .pill-error { background: var(--badsoft); color: var(--bad); }
 .pill-warn { background: var(--warnsoft); color: var(--warn); }
-.pill-running { background: var(--accsoft); color: var(--acc); }
+.pill-running { background: var(--runsoft); color: var(--run); }
 .pill-running::before { animation: pulse 1.1s ease-in-out infinite; }
 .pill-pending { background: var(--viosoft); color: var(--vio); }
 .pill-idle { background: var(--card2); color: var(--dim); border: 1px solid var(--border); }
@@ -457,7 +461,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--acc); }
   display: flex; align-items: center; gap: 6px; flex-wrap: wrap; white-space: nowrap; margin-top: 2px;
 }
 .hero-acc-sub { font-size: 12px; color: var(--dim); font-weight: 500; margin-top: 3px; }
-.hero-sub-running { color: var(--acc); font-weight: 600; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; }
+.hero-sub-running { color: var(--run); font-weight: 600; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; }
 .hero-bar-cell { margin-top: 7px; display: flex; flex-direction: column; gap: 6px; }
 .hero-stat-strip { display: flex; gap: 18px; flex-wrap: wrap; justify-content: space-between; max-width: 620px; }
 .hero-stat { display: flex; flex-direction: column; min-width: 54px; }
@@ -615,7 +619,7 @@ p.chart-empty { padding: 18px 2px; }
 .acc-detail-toggle .i { transition: transform .18s; }
 .acc-sub .acc-status-icon { font-weight: 700; font-size: 10px; display: inline-grid; place-items: center; }
 .acc-status-icon.stat-icon-check { color: var(--ok); }
-.acc-status-icon.stat-icon-running { color: var(--acc); }
+.acc-status-icon.stat-icon-running { color: var(--run); }
 .acc-status-icon.stat-icon-pending { color: var(--vio); }
 .acc-status-icon.stat-icon-alert { color: var(--bad); }
 .acc-status-icon.stat-icon-idle { color: var(--faint); }
