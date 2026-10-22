@@ -42,6 +42,72 @@ export function loadAccounts(sourceEnv = process.env) {
     return accounts
 }
 
+const ACCOUNT_KEY = /^ACCOUNT_\d+_/
+
+// `_resolveEnv()` in the Control API lays its own `process.env` down first and applies the
+// override on top, so an `ACCOUNT_N_*` key the override does not mention survives into the
+// bot. Every builder therefore has to blank the union of both sources — blanking only the
+// override's own keys used to be enough (the override was a superset of `process.env`),
+// but the roster resolver below drops deleted slots, which is exactly the case where it
+// stops being a superset.
+function blankAccountKeys(target, ...sources) {
+    for (const source of sources) {
+        for (const key of Object.keys(source || {})) {
+            if (ACCOUNT_KEY.test(key)) target[key] = ''
+        }
+    }
+    return target
+}
+
+/**
+ * 账号名单的权威来源。
+ *
+ * 控制 API 只在启动时读一次 `.env`，之后把文件里的值叠在 `process.env` 上。于是：
+ *   - **加**账号：键还不存在，叠进来即可 → 一直都是"立刻生效"；
+ *   - **删**账号：键在 `process.env` 里已经存在，没有人再比对文件里还在不在，于是删掉
+ *     的账号会一直留在名单里，直到重启控制 API。账户总览、运行、计划、诊断→会话管理
+ *     四个页面都读这份名单，所以会一起显示已经删掉的账号。
+ *
+ * 这里把名单改成以文件为准：文件里定义了任一非空 `ACCOUNT_*_EMAIL` 时，名单就是文件里
+ * 那些槽位，`process.env` 里已被删掉的槽位一律剔除 —— 加和删都立刻生效。文件里一个账号
+ * 都没有时（容器里只给环境变量的部署方式），名单仍然完全由 `process.env` 决定。
+ */
+export function resolveAccountsEnv(processEnv = {}, fileEnv = {}) {
+    const slots = new Set()
+    for (const [key, value] of Object.entries(fileEnv || {})) {
+        const match = /^ACCOUNT_(\d+)_EMAIL$/.exec(key)
+        if (match && String(value ?? '').trim()) slots.add(match[1])
+    }
+
+    const env = {}
+    for (const [key, value] of Object.entries(processEnv || {})) {
+        const match = ACCOUNT_KEY.exec(key)
+        if (slots.size && match && !slots.has(match[1])) continue
+        env[key] = value
+    }
+    for (const [key, value] of Object.entries(fileEnv || {})) env[key] = value
+    return env
+}
+
+/**
+ * 不带筛选的全量运行要给机器人的环境。
+ *
+ * 与 `buildSingleAccountEnv` / `buildExcludedAccountsEnv` 同样的道理：必须先清掉
+ * `process.env` 里那些已经不在名单上的 `ACCOUNT_*` 键，否则机器人从继承来的
+ * `process.env` 里把删掉的账号又捡回去，跑出面板根本没显示的账号。
+ */
+export function buildAllAccountsEnv(sourceEnv = process.env) {
+    const env = blankAccountKeys({}, process.env, sourceEnv)
+    for (const [key, value] of Object.entries(sourceEnv)) {
+        if (ACCOUNT_KEY.test(key)) env[key] = value
+    }
+
+    return {
+        env,
+        includedAccounts: loadAccounts(sourceEnv).map(({ index, email }) => ({ index, email }))
+    }
+}
+
 export function buildSingleAccountEnv(accountIndex, sourceEnv = process.env) {
     const index = Number(accountIndex)
     if (!Number.isSafeInteger(index) || index < 1) {
@@ -59,11 +125,7 @@ export function buildSingleAccountEnv(accountIndex, sourceEnv = process.env) {
         throw err
     }
 
-    const env = {}
-
-    for (const key of Object.keys(sourceEnv)) {
-        if (/^ACCOUNT_\d+_/.test(key)) env[key] = ''
-    }
+    const env = blankAccountKeys({}, process.env, sourceEnv)
 
     for (const [key, value] of selected) {
         const suffix = key.slice(selectedPrefix.length)
@@ -109,10 +171,7 @@ export function buildExcludedAccountsEnv(excludedAccountIndexes, sourceEnv = pro
         throw err
     }
 
-    const env = {}
-    for (const key of Object.keys(sourceEnv)) {
-        if (/^ACCOUNT_\d+_/.test(key)) env[key] = ''
-    }
+    const env = blankAccountKeys({}, process.env, sourceEnv)
 
     included.forEach((account, position) => {
         const sourcePrefix = `ACCOUNT_${account.index}_`

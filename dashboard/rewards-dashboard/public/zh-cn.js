@@ -270,6 +270,11 @@ const EXACT = {
   "No error.txt in this capture.": "该抓取中没有 error.txt。",
   "No configured accounts found.": "未找到已配置账户。",
   "The bot must be idle to clear a session": "机器人空闲时才能清除会话",
+  "Sessions for accounts no longer in .env:": "已不在 .env 里的账号，还留着这些会话：",
+  "Re-adding an account with the same address would reuse these.":
+    "以后用同样的邮箱把账号加回来，会继续沿用这些会话。",
+  "Clear orphaned sessions": "清理这些会话",
+  "Clearing…": "清理中…",
   "Clearing sessions can fix most common login issues":
     "清除会话可以修复大多数常见登录问题",
 

@@ -5,7 +5,7 @@ import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 
 import { ProcessManager } from './processManager.js'
-import { buildExcludedAccountsEnv, buildSingleAccountEnv, loadAccounts, mergeAccountStats } from './accounts.js'
+import { buildAllAccountsEnv, buildExcludedAccountsEnv, buildSingleAccountEnv, loadAccounts, mergeAccountStats, resolveAccountsEnv } from './accounts.js'
 import {
     validateConfig,
     deepMerge,
@@ -43,7 +43,9 @@ loadEnvFile(projectRoot)
 // therefore re-read the file per request: the file, not this process's
 // environment, is the authority for which accounts exist.
 function accountsEnv() {
-    return { ...process.env, ...readEnvFileValues(projectRoot) }
+    // 名单以 .env 文件为准（见 accounts.js 的 resolveAccountsEnv）：加、删账号都即时
+    // 生效，不需要重启控制 API。
+    return resolveAccountsEnv(process.env, readEnvFileValues(projectRoot))
 }
 
 const cliArgs = parseArgs(process.argv.slice(2), { boolean: ['help', 'h'] })
@@ -653,6 +655,10 @@ const requestHandler = async (req, res) => {
                         includedAccounts: selection.includedAccounts,
                         excludedAccounts: selection.excludedAccounts
                     }
+                } else {
+                    // 不带筛选的全量运行也要显式给一份环境：否则机器人继承控制 API 自己的
+                    // process.env，名单会比面板显示的还旧，已经删掉的账号会被再跑一遍。
+                    overrides.env = { ...(overrides.env || {}), ...buildAllAccountsEnv(accountsEnv()).env }
                 }
                 const info = pm.start(overrides)
                 return sendJson(res, 202, { started: true, selectedAccount, excludedAccounts, ...info })
@@ -712,6 +718,9 @@ const requestHandler = async (req, res) => {
                         includedAccounts: selection.includedAccounts,
                         excludedAccounts: selection.excludedAccounts
                     }
+                } else {
+                    // 同 /start：全量重跑也要带上以 .env 为准的名单。
+                    overrides.env = { ...(overrides.env || {}), ...buildAllAccountsEnv(accountsEnv()).env }
                 }
                 const info = await pm.restart(overrides)
                 return sendJson(res, 202, { restarted: true, selectedAccount, excludedAccounts, ...info })

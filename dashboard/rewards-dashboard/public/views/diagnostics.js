@@ -10,6 +10,7 @@ let open = null;
 let accountsPayload = null;
 let sessionsPayload = null;
 let clearing = new Set();
+let pruning = false;
 
 function render() {
   if (!rootEl || !payload) return;
@@ -107,6 +108,83 @@ async function clearSession(email) {
   }
 }
 
+// 删账号时没人清过机器人的 sessions.db，那些会话会一直留在库里。上面那张卡片是按
+// `.env` 里现有的账号画的，所以已删账号的会话连入口都没有了 —— 这里把它们单独列出来
+// 一次性清掉。（留着它们的实际后果：以后用同样的邮箱把账号加回来，会继续沿用一份
+// 来历不明的旧会话，看起来登录了、服务端却不认。）
+function orphanSessionEmails(configured) {
+  const out = [];
+  const seen = new Set();
+  for (const s of sessionsPayload?.sessions || []) {
+    const email = String(s.email || "");
+    const key = email.toLowerCase();
+    if (!key || configured.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push(email);
+  }
+  return out;
+}
+
+function renderOrphanStrip(configured, running) {
+  const strip = U.$("#sessionOrphanStrip", rootEl);
+  if (!strip) return;
+
+  const emails = orphanSessionEmails(configured);
+  if (!emails.length) {
+    strip.innerHTML = "";
+    return;
+  }
+
+  const list = emails.map((e) => U.escapeHtml(e)).join("、");
+  const busy = running || pruning;
+  strip.innerHTML = `
+        <p class="notice notice--warn" style="margin-top:10px">
+            <strong>${emails.length}</strong>
+            <span>Sessions for accounts no longer in .env:</span>
+            ${list}
+            <span>Re-adding an account with the same address would reuse these.</span>
+        </p>
+        <p style="margin-top:6px">
+            <button type="button" class="btn btn-danger btn-small" data-orphan-clear="${emails.length}" ${busy ? "disabled" : ""}>
+                ${pruning ? "Clearing&hellip;" : "Clear orphaned sessions"}
+            </button>
+        </p>`;
+
+  const btn = strip.querySelector("button[data-orphan-clear]");
+  if (btn) btn.addEventListener("click", () => clearOrphanSessions(emails));
+}
+
+async function clearOrphanSessions(emails) {
+  if (!context || !emails.length || pruning) return;
+  const confirmed = window.confirm(
+    `Clear stored sessions for ${emails.length} account(s) that are no longer in .env?\n\n` +
+      "The bot must not be running. These accounts would need to sign in again if you add them back.",
+  );
+  if (!confirmed) return;
+
+  pruning = true;
+  renderSessions();
+
+  const failed = [];
+  for (const email of emails) {
+    try {
+      await context.api.clearSession(email);
+    } catch (e) {
+      failed.push(`${email}: ${e.message}`);
+    }
+  }
+
+  pruning = false;
+  if (failed.length) {
+    context.toast(`Cleared ${emails.length - failed.length}/${emails.length}. ${failed.join("; ")}`, "error");
+  } else {
+    context.toast(`Cleared sessions for ${emails.length} deleted account(s).`, "success");
+  }
+
+  context.invalidate();
+  await context.refresh();
+}
+
 function renderSessions() {
   if (!rootEl) return;
   const list = U.$("#sessionCardList", rootEl);
@@ -114,12 +192,19 @@ function renderSessions() {
 
   if (!accountsPayload || !sessionsPayload) {
     list.innerHTML = '<p class="empty-note" style="padding:1.25rem">Loading&hellip;</p>';
+    renderOrphanStrip(new Set(), false);
     return;
   }
 
   const accounts = (accountsPayload.accounts || []).filter(
     (a) => a.configured,
   );
+  const configured = new Set(
+    accounts.map((a) => String(a.email).toLowerCase()),
+  );
+  const running = Boolean(context?.status?.botRunning);
+  renderOrphanStrip(configured, running);
+
   if (!accounts.length) {
     list.innerHTML =
       '<p class="empty-note" style="padding:1.25rem">No configured accounts found.</p>';
@@ -132,8 +217,6 @@ function renderSessions() {
     if (!byEmail.has(key)) byEmail.set(key, []);
     byEmail.get(key).push(s);
   }
-
-  const running = Boolean(context?.status?.botRunning);
 
   list.innerHTML = accounts
     .map((a) => {
@@ -199,6 +282,7 @@ export default {
                     <div class="session-card-list" id="sessionCardList">
                         <p class="empty-note" style="padding:1.25rem">Loading&hellip;</p>
                     </div>
+                    <div id="sessionOrphanStrip"></div>
                 </div>
             </section>
 

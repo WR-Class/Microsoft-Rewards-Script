@@ -820,8 +820,9 @@ async function handleApi(req, res, url) {
       envPath: BOT_ENV_PATH || null,
       accounts,
       readError,
-      // The bot reads .env at start, so a saved account is inert until restart.
-      restartRequired: true,
+      // 账号名单以 .env 为准：控制 API 每次请求重新解析文件，加和删都即时生效，
+      // 不需要重启任何东西（以前这里写 true，因为删掉的账号只会留在 API 的内存里）。
+      restartRequired: false,
     });
   }
 
@@ -850,7 +851,7 @@ async function handleApi(req, res, url) {
         "info",
         `Account ${result.created ? "added" : "updated"} in the bot's .env: index=${result.index} email=${body.email} (secrets not logged)`,
       );
-      return sendJson(res, 200, { ok: true, ...result, restartRequired: true });
+      return sendJson(res, 200, { ok: true, ...result, restartRequired: false });
     } catch (e) {
       return sendJson(res, 400, { error: e.message });
     }
@@ -873,7 +874,7 @@ async function handleApi(req, res, url) {
     try {
       const result = removeAccount(BOT_ENV_PATH, index);
       log("info", `Account removed from the bot's .env: index=${index} removed=${result.removed}`);
-      return sendJson(res, 200, { ok: true, ...result, restartRequired: true });
+      return sendJson(res, 200, { ok: true, ...result, restartRequired: false });
     } catch (e) {
       return sendJson(res, 500, { error: e.message });
     }

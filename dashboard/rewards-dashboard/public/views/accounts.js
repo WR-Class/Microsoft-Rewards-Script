@@ -41,7 +41,7 @@ function renderManageBox(root) {
   if (managePayload.readError) {
     hint.textContent = `读取出错：${managePayload.readError}`;
   } else if (accounts.length) {
-    hint.textContent = `机器人 .env 里已有 ${accounts.length} 个账号。${where}。改动需要重启机器人后才生效。`;
+    hint.textContent = `机器人 .env 里已有 ${accounts.length} 个账号。${where}。改动立即生效，不用重启。`;
   } else {
     hint.textContent = `机器人 .env 里还没有账号，填一个邮箱即可。${where}`;
   }
